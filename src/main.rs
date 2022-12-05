@@ -37,7 +37,14 @@ impl Quip8App {
 impl eframe::App for Quip8App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello World!");
+            use egui::menu;
+            menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open").clicked() {
+                        // …
+                    }
+                });
+            });
         });
 
         self.chip8.emulate_cycle();
