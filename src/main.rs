@@ -3,7 +3,9 @@
 use eframe::egui;
 
 #[derive(Default)]
-struct Quip8App {}
+struct Quip8App {
+    chip8: Chip8,
+}
 
 impl Quip8App {
     #[allow(unused_variables)]
@@ -18,6 +20,14 @@ impl eframe::App for Quip8App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Hello World!");
         });
+
+        self.chip8.emulate_cycle();
+
+        if self.chip8.draw_flag {
+            draw_graphics();
+        }
+
+        self.chip8.set_keys();
     }
 }
 
@@ -36,6 +46,12 @@ struct Chip8 {
     key: [u8; 16],
 
     draw_flag: bool,
+}
+
+impl Default for Chip8 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Chip8 {
@@ -69,23 +85,10 @@ impl Chip8 {
 fn draw_graphics() {}
 
 fn main() {
-    let chip8 = Chip8::new();
-
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "QUIP-8",
         options,
         Box::new(|cc| Box::new(Quip8App::new(cc))),
     );
-
-    loop {
-        chip8.emulate_cycle();
-
-        if chip8.draw_flag {
-            draw_graphics();
-        }
-
-        chip8.set_keys();
-        break;
-    }
 }
