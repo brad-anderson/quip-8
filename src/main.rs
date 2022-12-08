@@ -28,9 +28,12 @@ struct Quip8App {
 
 impl Quip8App {
     #[allow(unused_variables)]
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, initial_rom: Option<std::path::PathBuf>) -> Self {
         // egui customizations go here
-        Self::default()
+        Self {
+            chip8: Chip8::new(initial_rom),
+            ..Self::default()
+        }
     }
 }
 
@@ -45,6 +48,14 @@ impl eframe::App for Quip8App {
                     }
                 });
             });
+            if let Some(file) = &self.chip8.loaded_rom {
+                ui.heading(
+                    file.file_name()
+                        .expect("no filename")
+                        .to_str()
+                        .expect("filename not valid unicode"),
+                );
+            }
         });
 
         self.chip8.emulate_cycle();
@@ -72,16 +83,17 @@ struct Chip8 {
     key: [u8; 16],
 
     draw_flag: bool,
+    loaded_rom: Option<std::path::PathBuf>,
 }
 
 impl Default for Chip8 {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl Chip8 {
-    pub fn new() -> Self {
+    pub fn new(rom: Option<std::path::PathBuf>) -> Self {
         let mut s = Self {
             opcode: 0,
             memory: [0; 4096],
@@ -95,13 +107,27 @@ impl Chip8 {
             sp: 0,
             key: [0; 16],
             draw_flag: false,
+            loaded_rom: rom.clone(),
         };
         s.memory[0..FONT_SET.len()].copy_from_slice(FONT_SET.as_slice());
+        if let Some(r) = rom {
+            let mut file_contents = std::fs::read(r).expect("Could not read file");
+            file_contents.resize(4096 - 512, 0);
+            s.memory[512..4096].copy_from_slice(file_contents.as_slice());
+        }
         s
     }
 
-    fn emulate_cycle(&self) {
+    fn emulate_cycle(&mut self) {
         // fetch opcode
+        let opcode = self.memory[self.pc as usize] << 8 | self.memory[self.pc as usize + 1];
+
+        match opcode & 0xF000 {
+            0xA00 => {
+                self.i = (opcode & 0x0FFF) as u16;
+                self.pc += 2;
+            }
+        }
         // decode opcode
         // execute opcode
 
@@ -113,10 +139,12 @@ impl Chip8 {
 fn draw_graphics() {}
 
 fn main() {
+    let path = std::env::args().nth(1).map(std::path::PathBuf::from);
+
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "QUIP-8",
         options,
-        Box::new(|cc| Box::new(Quip8App::new(cc))),
+        Box::new(|cc| Box::new(Quip8App::new(cc, path))),
     );
 }
