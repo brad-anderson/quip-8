@@ -58,13 +58,15 @@ impl eframe::App for Quip8App {
             }
         });
 
-        self.chip8.emulate_cycle();
+        if self.chip8.loaded_rom.is_some() {
+            self.chip8.emulate_cycle();
 
-        if self.chip8.draw_flag {
-            draw_graphics();
+            if self.chip8.draw_flag {
+                draw_graphics();
+            }
+
+            self.chip8.set_keys();
         }
-
-        self.chip8.set_keys();
     }
 }
 
@@ -120,11 +122,20 @@ impl Chip8 {
 
     fn emulate_cycle(&mut self) {
         // fetch opcode
-        let opcode = self.memory[self.pc as usize] << 8 | self.memory[self.pc as usize + 1];
+        self.opcode =
+            (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
 
-        match opcode & 0xF000 {
-            0xA00 => {
-                self.i = (opcode & 0x0FFF) as u16;
+        match self.opcode & 0xF000 {
+            0x6000 => {
+                self.v[(self.opcode & 0x0F00 >> 6) as usize] = (self.opcode & 0x00FF) as u8;
+                self.pc += 2;
+            }
+            0xA000 => {
+                self.i = self.opcode & 0x0FFF;
+                self.pc += 2;
+            }
+            _ => {
+                std::eprintln!("Unknown opcode {:#06x}", self.opcode);
                 self.pc += 2;
             }
         }
