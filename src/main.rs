@@ -39,7 +39,7 @@ impl Quip8App {
 
 impl eframe::App for Quip8App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("top").show(ctx, |ui| {
             use egui::menu;
             menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -48,6 +48,114 @@ impl eframe::App for Quip8App {
                     }
                 });
             });
+        });
+
+        egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
+            ui.add_enabled_ui(self.chip8.loaded_rom.is_some(), |ui| {
+                if ui.button("Step").clicked() {
+                    self.chip8.emulate_cycle();
+                }
+                ui.label("Next opcode:");
+                ui.label(format!("{:#06x}", self.chip8.next_opcode));
+            });
+        });
+
+        egui::SidePanel::left("registers").show(ctx, |ui| {
+            ui.heading("Registers");
+            egui::Grid::new("registers").show(ui, |ui| {
+                ui.label("PC");
+                ui.label(self.chip8.pc.to_string());
+                ui.end_row();
+
+                ui.label("I");
+                ui.label(self.chip8.i.to_string());
+                ui.end_row();
+
+                ui.label("V0");
+                ui.label(self.chip8.v[0].to_string());
+                ui.end_row();
+
+                ui.label("V1");
+                ui.label(self.chip8.v[1].to_string());
+                ui.end_row();
+
+                ui.label("V2");
+                ui.label(self.chip8.v[2].to_string());
+                ui.end_row();
+
+                ui.label("V3");
+                ui.label(self.chip8.v[3].to_string());
+                ui.end_row();
+
+                ui.label("V4");
+                ui.label(self.chip8.v[4].to_string());
+                ui.end_row();
+
+                ui.label("V5");
+                ui.label(self.chip8.v[5].to_string());
+                ui.end_row();
+
+                ui.label("V6");
+                ui.label(self.chip8.v[6].to_string());
+                ui.end_row();
+
+                ui.label("V7");
+                ui.label(self.chip8.v[7].to_string());
+                ui.end_row();
+
+                ui.label("V8");
+                ui.label(self.chip8.v[8].to_string());
+                ui.end_row();
+
+                ui.label("V9");
+                ui.label(self.chip8.v[9].to_string());
+                ui.end_row();
+
+                ui.label("VA");
+                ui.label(self.chip8.v[10].to_string());
+                ui.end_row();
+
+                ui.label("VB");
+                ui.label(self.chip8.v[11].to_string());
+                ui.end_row();
+
+                ui.label("VC");
+                ui.label(self.chip8.v[12].to_string());
+                ui.end_row();
+
+                ui.label("VD");
+                ui.label(self.chip8.v[13].to_string());
+                ui.end_row();
+
+                ui.label("VE");
+                ui.label(self.chip8.v[14].to_string());
+                ui.end_row();
+
+                ui.label("VF");
+                ui.label(self.chip8.v[15].to_string());
+                ui.end_row();
+            });
+
+            ui.heading("Timers");
+            egui::Grid::new("timers").show(ui, |ui| {
+                ui.label("Delay");
+                ui.label(self.chip8.pc.to_string());
+                ui.end_row();
+
+                ui.label("Sound");
+                ui.label(self.chip8.pc.to_string());
+                ui.end_row();
+            });
+        });
+
+        egui::SidePanel::right("memory").show(ctx, |ui| {
+            ui.heading("Memory");
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label("Hello World!");
+            //ui.painter().rect(ui.shrink_height_to_current)
+
             if let Some(file) = &self.chip8.loaded_rom {
                 ui.heading(
                     file.file_name()
@@ -58,7 +166,7 @@ impl eframe::App for Quip8App {
             }
         });
 
-        if self.chip8.loaded_rom.is_some() {
+        /*if self.chip8.loaded_rom.is_some() {
             self.chip8.emulate_cycle();
 
             if self.chip8.draw_flag {
@@ -67,6 +175,7 @@ impl eframe::App for Quip8App {
 
             self.chip8.set_keys();
         }
+        */
     }
 }
 
@@ -85,6 +194,9 @@ struct Chip8 {
     key: [u8; 16],
 
     draw_flag: bool,
+
+    next_opcode: u16,
+
     loaded_rom: Option<std::path::PathBuf>,
 }
 
@@ -109,6 +221,7 @@ impl Chip8 {
             sp: 0,
             key: [0; 16],
             draw_flag: false,
+            next_opcode: 0,
             loaded_rom: rom.clone(),
         };
         s.memory[0..FONT_SET.len()].copy_from_slice(FONT_SET.as_slice());
@@ -117,6 +230,7 @@ impl Chip8 {
             file_contents.resize(4096 - 512, 0);
             s.memory[512..4096].copy_from_slice(file_contents.as_slice());
         }
+        s.next_opcode = (s.memory[s.pc as usize] as u16) << 8 | s.memory[s.pc as usize + 1] as u16;
         s
     }
 
@@ -125,9 +239,10 @@ impl Chip8 {
         self.opcode =
             (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
 
+        // decode opcode
         match self.opcode & 0xF000 {
             0x6000 => {
-                self.v[(self.opcode & 0x0F00 >> 6) as usize] = (self.opcode & 0x00FF) as u8;
+                self.v[((self.opcode & 0x0F00) >> 8) as usize] = (self.opcode & 0x00FF) as u8;
                 self.pc += 2;
             }
             0xA000 => {
@@ -139,10 +254,13 @@ impl Chip8 {
                 self.pc += 2;
             }
         }
-        // decode opcode
+
         // execute opcode
 
         // update timers
+
+        self.next_opcode =
+            (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
     }
     fn set_keys(&self) {}
 }
