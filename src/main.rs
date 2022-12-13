@@ -212,41 +212,207 @@ type RegisterAddress = u8;
 type Literal = u8;
 
 enum Opcode {
-    CallMachineCode(Address), // 0NNN 	Call 		Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
-    ClearDisplay,             //00E0 	Display 	disp_clear() 	Clears the screen.
-    Return,                   //00EE 	Flow 	return; 	Returns from a subroutine.
-    Jump(Address),            // 1NNN 	Flow 	goto NNN; 	Jumps to address NNN.
-    Call(Address),            //2NNN 	Flow 	*(0xNNN)() 	Calls subroutine at NNN.
-    IfLiteralEqual((RegisterAddress, Literal)), //3XNN 	Cond 	if (Vx == NN) 	Skips the next instruction if VX equals NN (usually the next instruction is a jump to skip a code block).
-    IfLiteralNotEqual((RegisterAddress, Literal)), // 4XNN 	Cond 	if (Vx != NN) 	Skips the next instruction if VX does not equal NN (usually the next instruction is a jump to skip a code block).
-    IfEqual((RegisterAddress, RegisterAddress)), //5XY0 	Cond 	if (Vx == Vy) 	Skips the next instruction if VX equals VY (usually the next instruction is a jump to skip a code block).
-    LoadLiteral((RegisterAddress, Literal)),     //6XNN 	Const 	Vx = NN 	Sets VX to NN.
-    AddLiteral((RegisterAddress, Literal)), //7XNN 	Const 	Vx += NN 	Adds NN to VX (carry flag is not changed).
-    Copy((RegisterAddress, RegisterAddress)), //8XY0 	Assig 	Vx = Vy 	Sets VX to the value of VY.
-    Or((RegisterAddress, RegisterAddress)), // 8XY1 	BitOp 	Vx |= Vy 	Sets VX to VX or VY. (bitwise OR operation)
-    And((RegisterAddress, RegisterAddress)), //8XY2 	BitOp 	Vx &= Vy 	Sets VX to VX and VY. (bitwise AND operation)
-    Xor((RegisterAddress, RegisterAddress)), // 8XY3[a] 	BitOp 	Vx ^= Vy 	Sets VX to VX xor VY.
-    Add((RegisterAddress, RegisterAddress)), // 8XY4 	Math 	Vx += Vy 	Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there is not.
-    Subtract((RegisterAddress, RegisterAddress)), // 8XY5 	Math 	Vx -= Vy 	VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there is not.
-    BitshiftRightOne(RegisterAddress), // Better Name? 8XY6[a] 	BitOp 	Vx >>= 1 	Stores the least significant bit of VX in VF and then shifts VX to the right by 1.[b]
-    RevSub((RegisterAddress, RegisterAddress)), // Better Name? 8XY7[a] 	Math 	Vx = Vy - Vx 	Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there is not.
-    BitshiftLeftOne(RegisterAddress), // Better Name? 8XYE[a] 	BitOp 	Vx <<= 1 	Stores the most significant bit of VX in VF and then shifts VX to the left by 1.[b]
-    IfNotEqual((RegisterAddress, RegisterAddress)), //9XY0 	Cond 	if (Vx != Vy) 	Skips the next instruction if VX does not equal VY. (Usually the next instruction is a jump to skip a code block);
-    LoadI(Address),                                 //ANNN 	MEM 	I = NNN 	Sets I to the address NNN.
-    OffsetJump(Address), // BNNN 	Flow 	PC = V0 + NNN 	Jumps to the address NNN plus V0.
-    LoadRandom((RegisterAddress, Literal)), //CXNN 	Rand 	Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
-    DrawSprite((RegisterAddress, RegisterAddress, Literal)), //DXYN 	Display 	draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
-    IfKey(RegisterAddress), // EX9E 	KeyOp 	if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
-    IfNotKey(RegisterAddress), //EXA1 	KeyOp 	if (key() != Vx) 	Skips the next instruction if the key stored in VX is not pressed (usually the next instruction is a jump to skip a code block).
-    LoadFromDelayTimer(RegisterAddress), //FX07 	Timer 	Vx = get_delay() 	Sets VX to the value of the delay timer.
-    AwaitKey(RegisterAddress), //FX0A 	KeyOp 	Vx = get_key() 	A key press is awaited, and then stored in VX (blocking operation, all instruction halted until next key event).
-    LoadDelayTimer(RegisterAddress), //FX15	Timer 	delay_timer(Vx) 	Sets the delay timer to VX.
-    LoadSoundTimer(RegisterAddress), //FX18 	Sound 	sound_timer(Vx) 	Sets the sound timer to VX.
-    AddI(RegisterAddress),     //FX1E 	MEM 	I += Vx 	Adds VX to I. VF is not affected.[c]
-    LoadSpriteAddress(RegisterAddress), //FX29 	MEM 	I = sprite_addr[Vx] 	Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
-    BinaryCodedDecimal(RegisterAddress), // FX33 	BCD 	  set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);  Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
-    StoreRegisters(RegisterAddress), //FX55 	MEM 	reg_dump(Vx, &I) 	Stores from V0 to VX (including VX) in memory, starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
-    LoadRegisters(RegisterAddress), //FX65 	MEM 	reg_load(Vx, &I) 	Fills from V0 to VX (including VX) with values from memory, starting at address I. The offset from I is increased by 1 for each value read, but I itself is left unmodified.[d]
+    // 0x0NNN - Call
+    // Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
+    CallMachineCode(Address),
+
+    // 0x00E0 - Display
+    // C Pseudo: disp_clear()
+    // Clears the screen.
+    ClearDisplay,
+
+    // 0x00EE - Flow
+    // C Pseudo: return;
+    // Returns from a subroutine.
+    Return,
+
+    // 0x1NNN - Flow
+    // C Pseudo: goto NNN;
+    // Jumps to address NNN.
+    Jump(Address),
+
+    // 0x2NNN - Flow
+    // C Pseudo: *(0xNNN)()
+    // Calls subroutine at NNN.
+    Call(Address),
+
+    // 0x3XNN - Cond
+    // C Pseudo: if (Vx == NN)
+    // Skips the next instruction if VX equals NN (usually the next instruction
+    // is a jump to skip a code block).
+    IfLiteralEqual((RegisterAddress, Literal)),
+
+    // 0x4XNN - Cond
+    // C Pseudo: if (Vx != NN)
+    // Skips the next instruction if VX does not equal NN (usually the next
+    // instruction is a jump to skip a code block).
+    IfLiteralNotEqual((RegisterAddress, Literal)),
+
+    // 0x5XY0 - Cond
+    // C Pseudo: if (Vx == Vy)
+    // Skips the next instruction if VX equals VY (usually the next instruction
+    // is a jump to skip a code block).
+    IfEqual((RegisterAddress, RegisterAddress)),
+
+    // 0x6XNN - Const
+    // C Pseudo: Vx = NN
+    // Sets VX to NN.
+    LoadLiteral((RegisterAddress, Literal)),
+
+    // 0x7XNN - Const
+    // C Pseudo: Vx += NN
+    // Adds NN to VX (carry flag is not changed).
+    AddLiteral((RegisterAddress, Literal)),
+
+    // 0x8XY0 - Assig
+    // C Pseudo: Vx = Vy
+    // Sets VX to the value of VY.
+    Copy((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY1 - BitOp
+    // C Pseudo: Vx |= Vy
+    // Sets VX to VX or VY. (bitwise OR operation)
+    Or((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY2 - BitOp
+    // C Pseudo: Vx &= Vy
+    // Sets VX to VX and VY. (bitwise AND operation)
+    And((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY3[a] - BitOp
+    // C Pseudo: Vx ^= Vy
+    // Sets VX to VX xor VY.
+    Xor((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY4 - Math
+    // C Pseudo: Vx += Vy
+    // Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there
+    // is not.
+    Add((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY5 - Math
+    // C Pseudo: Vx -= Vy
+    // VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1
+    // when there is not.
+    Subtract((RegisterAddress, RegisterAddress)),
+
+    // 0x8XY6 - BitOp
+    // C Pseudo: Vx >>= 1
+    // Stores the least significant bit of VX in VF and then shifts VX to the
+    // right by 1.
+    // Better Name?
+    BitshiftRightOne(RegisterAddress),
+
+    // 0x8XY7 - Math
+    // C Pseudo: Vx = Vy - Vx
+    // Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when
+    //  there is not.
+    // Better Name?
+    RevSub((RegisterAddress, RegisterAddress)),
+
+    // 0x8XYE - BitOp
+    // C Pseudo: Vx <<= 1
+    // Stores the most significant bit of VX in VF and then shifts VX to the
+    // left by 1.
+    // Better Name?
+    BitshiftLeftOne(RegisterAddress),
+
+    // 0x9XY0 - Cond
+    // C Pseudo: if (Vx != Vy)
+    // Skips the next instruction if VX does not equal VY. (Usually the next
+    // instruction is a jump to skip a code block);
+    IfNotEqual((RegisterAddress, RegisterAddress)),
+
+    // 0xANNN - MEM
+    // C Pseudo: I = NNN
+    // Sets I to the address NNN.
+    LoadI(Address),
+
+    // 0xBNNN - Flow
+    // C Pseudo: PC = V0 + NNN
+    // Jumps to the address NNN plus V0.
+    OffsetJump(Address),
+
+    // 0xCXNN - Rand
+    // C Pseudo: Vx = rand() & NN
+    // Sets VX to the result of a bitwise and operation on a random number
+    // (Typically: 0 to 255) and NN.
+    LoadRandom((RegisterAddress, Literal)),
+
+    // 0xDXYN - Display
+    // C Pseudo: draw(Vx, Vy, N)
+    // Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and
+    // a height of N pixels. Each row of 8 pixels is read as bit-coded starting
+    // from memory location I; I value does not change after the execution of
+    // this instruction. As described above, VF is set to 1 if any screen pixels
+    // are flipped from set to unset when the sprite is drawn, and to 0 if that
+    // does not happen.
+    DrawSprite((RegisterAddress, RegisterAddress, Literal)),
+
+    // 0xEX9E - KeyOp
+    // C Pseudo: if (key() == Vx)
+    // Skips the next instruction if the key stored in VX is pressed (usually
+    // the next instruction is a jump to skip a code block).
+    IfKey(RegisterAddress),
+
+    // 0xEXA1 - KeyOp
+    // C Pseudo: if (key() != Vx)
+    // Skips the next instruction if the key stored in VX is not pressed
+    // (usually the next instruction is a jump to skip a code block).
+    IfNotKey(RegisterAddress),
+
+    // 0xFX07 - Timer
+    // C Pseudo: Vx = get_delay()
+    // Sets VX to the value of the delay timer.
+    LoadFromDelayTimer(RegisterAddress),
+
+    // 0xFX0A - KeyOp
+    // C Pseudo: Vx = get_key()
+    // A key press is awaited, and then stored in VX (blocking operation, all
+    // instruction halted until next key event).
+    AwaitKey(RegisterAddress),
+
+    // 0xFX15 - Timer
+    // C Pseudo: delay_timer(Vx)
+    // Sets the delay timer to VX.
+    LoadDelayTimer(RegisterAddress),
+
+    // 0xFX18 - Sound
+    // C Pseudo: sound_timer(Vx)
+    // Sets the sound timer to VX.
+    LoadSoundTimer(RegisterAddress),
+
+    // 0xFX1E - MEM
+    // C Pseudo: I += Vx
+    // Adds VX to I. VF is not affected.[c]
+    AddI(RegisterAddress),
+
+    // 0xFX29 - MEM
+    // C Pseudo: I = sprite_addr[Vx]
+    // Sets I to the location of the sprite for the character in VX. Characters
+    //  0-F (in hexadecimal) are represented by a 4x5 font.
+    LoadSpriteAddress(RegisterAddress),
+
+    // 0xFX33 - BCD
+    // C Pseudo: set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);
+    // Stores the binary-coded decimal representation of VX, with the hundreds
+    // digit in memory at location in I, the tens digit at location I+1, and
+    // the ones digit at location I+2.
+    BinaryCodedDecimal(RegisterAddress),
+
+    // 0xFX55 - MEM
+    // C Pseudo: reg_dump(Vx, &I)
+    // Stores from V0 to VX (including VX) in memory, starting at address I.
+    // The offset from I is increased by 1 for each value written, but I itself
+    // is left unmodified.[d]
+    StoreRegisters(RegisterAddress),
+
+    // 0xFX65 - MEM
+    // C Pseudo: reg_load(Vx, &I)
+    // Fills from V0 to VX (including VX) with values from memory, starting at
+    // address I. The offset from I is increased by 1 for each value read, but
+    // I itself is left unmodified.[d]
+    LoadRegisters(RegisterAddress),
 }
 
 struct UnknownOpcode;
@@ -415,13 +581,21 @@ impl Chip8 {
         // decode opcode
         match Opcode::decode(self.opcode) {
             Ok(decoded_opcode) => match decoded_opcode {
-                Opcode::CallMachineCode(_address) => {} //Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
-                Opcode::ClearDisplay => {}              // 	disp_clear() 	Clears the screen.
-                Opcode::Return => {}                    //return; 	Returns from a subroutine.
+                Opcode::CallMachineCode(_address) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
+                Opcode::ClearDisplay => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } // 	disp_clear() 	Clears the screen.
+                Opcode::Return => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //return; 	Returns from a subroutine.
                 Opcode::Jump(address) => {
                     self.pc = address;
                 } //goto NNN; 	Jumps to address NNN.
-                Opcode::Call(address) => {}             //*(0xNNN)() 	Calls subroutine at NNN.
+                Opcode::Call(address) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //*(0xNNN)() 	Calls subroutine at NNN.
                 Opcode::IfLiteralEqual((register, literal)) => {
                     if self.v[register as usize] == literal {
                         self.pc += 2;
@@ -487,13 +661,21 @@ impl Chip8 {
                 Opcode::LoadRandom((register, literal)) => {
                     self.v[register as usize] = random::<u8>() & literal;
                 } //Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
-                Opcode::DrawSprite((register_x, register_y, literal)) => {} //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
-                Opcode::IfKey(register) => {} // if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
-                Opcode::IfNotKey(register) => {} //if (key() != Vx) 	Skips the next instruction if the key stored in VX is not pressed (usually the next instruction is a jump to skip a code block).
+                Opcode::DrawSprite((register_x, register_y, literal)) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
+                Opcode::IfKey(register) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } // if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
+                Opcode::IfNotKey(register) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //if (key() != Vx) 	Skips the next instruction if the key stored in VX is not pressed (usually the next instruction is a jump to skip a code block).
                 Opcode::LoadFromDelayTimer(register) => {
                     self.v[register as usize] = self.delay_timer;
                 } //Vx = get_delay() 	Sets VX to the value of the delay timer.
-                Opcode::AwaitKey(register) => {} //Vx = get_key() 	A key press is awaited, and then stored in VX (blocking operation, all instruction halted until next key event).
+                Opcode::AwaitKey(register) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //Vx = get_key() 	A key press is awaited, and then stored in VX (blocking operation, all instruction halted until next key event).
                 Opcode::LoadDelayTimer(register) => {
                     self.delay_timer = self.v[register as usize];
                 } //delay_timer(Vx) 	Sets the delay timer to VX.
@@ -503,8 +685,12 @@ impl Chip8 {
                 Opcode::AddI(register) => {
                     self.i += self.v[register as usize] as u16;
                 } //I += Vx 	Adds VX to I. VF is not affected.[c]
-                Opcode::LoadSpriteAddress(register) => {} //I = sprite_addr[Vx] 	Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
-                Opcode::BinaryCodedDecimal(register) => {} // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);  Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
+                Opcode::LoadSpriteAddress(register) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } //I = sprite_addr[Vx] 	Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
+                Opcode::BinaryCodedDecimal(register) => {
+                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                } // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);  Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
                 Opcode::StoreRegisters(register) => {
                     self.memory[(self.i as usize)..(register + 1) as usize]
                         .copy_from_slice(self.v.as_slice());
