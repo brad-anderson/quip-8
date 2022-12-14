@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
+use egui::{Color32, Pos2, Sense, Stroke};
 use rand::prelude::*;
 
 static FONT_SET: [u8; 80] = [
@@ -56,8 +57,21 @@ impl eframe::App for Quip8App {
                 if ui.button("Step").clicked() {
                     self.chip8.emulate_cycle();
                 }
-                ui.label("Next opcode:");
-                ui.label(format!("{:#06x}", self.chip8.next_opcode));
+                ui.label(format!(
+                    "Next opcode: {:#06X} - {}",
+                    self.chip8.next_opcode,
+                    Opcode::decode(self.chip8.next_opcode)
+                        .map_or("Unknown opcode".to_string(), |o| o.describe())
+                ));
+                /*
+                if let Some(file) = &self.chip8.loaded_rom {
+                    ui.heading(
+                        file.file_name()
+                            .expect("no filename")
+                            .to_str()
+                            .expect("filename not valid unicode"),
+                    );
+                }*/
             });
         });
 
@@ -65,86 +79,28 @@ impl eframe::App for Quip8App {
             ui.heading("Registers");
             egui::Grid::new("registers").show(ui, |ui| {
                 ui.label("PC");
-                ui.label(self.chip8.pc.to_string());
+                ui.label(format!("{:#05X}", self.chip8.pc));
                 ui.end_row();
 
                 ui.label("I");
-                ui.label(self.chip8.i.to_string());
+                ui.label(format!("{:#05X}", self.chip8.i));
                 ui.end_row();
 
-                ui.label("V0");
-                ui.label(self.chip8.v[0].to_string());
-                ui.end_row();
-
-                ui.label("V1");
-                ui.label(self.chip8.v[1].to_string());
-                ui.end_row();
-
-                ui.label("V2");
-                ui.label(self.chip8.v[2].to_string());
-                ui.end_row();
-
-                ui.label("V3");
-                ui.label(self.chip8.v[3].to_string());
-                ui.end_row();
-
-                ui.label("V4");
-                ui.label(self.chip8.v[4].to_string());
-                ui.end_row();
-
-                ui.label("V5");
-                ui.label(self.chip8.v[5].to_string());
-                ui.end_row();
-
-                ui.label("V6");
-                ui.label(self.chip8.v[6].to_string());
-                ui.end_row();
-
-                ui.label("V7");
-                ui.label(self.chip8.v[7].to_string());
-                ui.end_row();
-
-                ui.label("V8");
-                ui.label(self.chip8.v[8].to_string());
-                ui.end_row();
-
-                ui.label("V9");
-                ui.label(self.chip8.v[9].to_string());
-                ui.end_row();
-
-                ui.label("VA");
-                ui.label(self.chip8.v[10].to_string());
-                ui.end_row();
-
-                ui.label("VB");
-                ui.label(self.chip8.v[11].to_string());
-                ui.end_row();
-
-                ui.label("VC");
-                ui.label(self.chip8.v[12].to_string());
-                ui.end_row();
-
-                ui.label("VD");
-                ui.label(self.chip8.v[13].to_string());
-                ui.end_row();
-
-                ui.label("VE");
-                ui.label(self.chip8.v[14].to_string());
-                ui.end_row();
-
-                ui.label("VF");
-                ui.label(self.chip8.v[15].to_string());
-                ui.end_row();
+                for v in self.chip8.v.iter().enumerate() {
+                    ui.label(format!("V{:X}", v.0));
+                    ui.label(format!("{:#04x}", v.1));
+                    ui.end_row();
+                }
             });
 
             ui.heading("Timers");
             egui::Grid::new("timers").show(ui, |ui| {
                 ui.label("Delay");
-                ui.label(self.chip8.pc.to_string());
+                ui.label(format!("{:#04X}", self.chip8.delay_timer));
                 ui.end_row();
 
                 ui.label("Sound");
-                ui.label(self.chip8.pc.to_string());
+                ui.label(format!("{:#04X}", self.chip8.sound_timer));
                 ui.end_row();
             });
         });
@@ -154,16 +110,43 @@ impl eframe::App for Quip8App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Hello World!");
-            //ui.painter().rect(ui.shrink_height_to_current)
+            let painter_size = ui.available_size();
+            let (res, painter) = ui.allocate_painter(painter_size, Sense::hover());
 
-            if let Some(file) = &self.chip8.loaded_rom {
-                ui.heading(
-                    file.file_name()
-                        .expect("no filename")
-                        .to_str()
-                        .expect("filename not valid unicode"),
-                );
+            for (row, row_data) in self.chip8.vbuf.iter().enumerate() {
+                for col in 0..64 {
+                    if row_data & (1 << col) > 0 {
+                        painter.rect_filled(
+                            egui::Rect {
+                                min: Pos2 {
+                                    x: res.rect.left() + painter_size.x / 64.0 * col as f32,
+                                    y: res.rect.top() + painter_size.y / 32.0 * row as f32,
+                                },
+                                max: Pos2 {
+                                    x: res.rect.left() + painter_size.x / 64.0 * (col + 1) as f32,
+                                    y: res.rect.top() + painter_size.y / 32.0 * (row + 1) as f32,
+                                },
+                            },
+                            0.0,
+                            Color32::WHITE,
+                        );
+                    } else {
+                        painter.rect_stroke(
+                            egui::Rect {
+                                min: Pos2 {
+                                    x: res.rect.left() + painter_size.x / 64.0 * col as f32,
+                                    y: res.rect.top() + painter_size.y / 32.0 * row as f32,
+                                },
+                                max: Pos2 {
+                                    x: res.rect.left() + painter_size.x / 64.0 * (col + 1) as f32,
+                                    y: res.rect.top() + painter_size.y / 32.0 * (row + 1) as f32,
+                                },
+                            },
+                            0.0,
+                            Stroke::new(1.0, Color32::DARK_GRAY),
+                        );
+                    }
+                }
             }
         });
 
@@ -193,6 +176,8 @@ struct Chip8 {
     stack: [u16; 16],
     sp: u16,
     key: [u8; 16],
+
+    vbuf: [u64; 32],
 
     draw_flag: bool,
 
@@ -542,6 +527,49 @@ impl Opcode {
             _ => Err(UnknownOpcode),
         }
     }
+
+    fn describe(&self) -> String {
+        match self {
+            Opcode::CallMachineCode(address) => format!(
+                "Call machine code routine (RCA 1802 for COSMAC VIP) at address {address:#05X}."),
+            Opcode::ClearDisplay => format!("Clear the screen"),
+            Opcode::Return => format!("Return from subroutine (pop the stack)"),
+            Opcode::Jump(address) => format!("Jump to address {address:#05X}"),
+            Opcode::Call(address) => format!("Calls subroutine at {address:#05X} (push on the stack)"),
+            Opcode::IfLiteralEqual((register, literal)) => format!(
+                "Skips the next instruction if V{register:X} equals {literal:#04X}"),
+            Opcode::IfLiteralNotEqual((register, literal)) => format!(
+                "Skips the next instruction if V{register:X} does not equal {literal:#04X}"),
+            Opcode::IfEqual((register_x, register_y)) => format!("Skips the next instruction if V{register_x:X} equals V{register_y:X}"),
+            Opcode::LoadLiteral((register, literal)) => format!("Sets V{register:X} to {literal:#04X}"),
+            Opcode::AddLiteral((register, literal)) => format!("Adds {literal:#04X} to V{register:X} (carry flag is not changed)"),
+            Opcode::Copy((register_x, register_y)) => format!("Sets V{register_x:X} to the value of V{register_y}"),
+            Opcode::Or((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} or V{register_y:X}. (bitwise OR operation"),
+            Opcode::And((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} and V{register_y:X}. (bitwise AND operation"),
+            Opcode::Xor((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} xor V{register_y:X}."),
+            Opcode::Add((register_x, register_y)) => format!("Adds V{register_y:X} to V{register_x:X}. VF is set to 1 when there's a carry, and to 0 when there is not."),
+            Opcode::Subtract((register_x, register_y)) => format!("V{register_y:X} is subtracted from V{register_x:X}. VF is set to 0 when there's a borrow, and 1 when there is not."),
+            Opcode::BitshiftRightOne(register) => format!("Stores the least significant bit of V{register:X} in VF and then shifts V{register:X} to the right by 1."),
+            Opcode::RevSub((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_y:X} minus V{register_x:X}. VF is set to 0 when there's a borrow, and 1 when there is not."),
+            Opcode::BitshiftLeftOne(register) => format!("Stores the most significant bit of V{register:X} in VF and then shifts V{register:X} to the left by 1"),
+            Opcode::IfNotEqual((register_x, register_y)) => format!("Skips the next instruction if V{register_x:X} does not equal V{register_y:X}"),
+            Opcode::LoadI(address) => format!("Sets I to the address {address:#05X}"),
+            Opcode::OffsetJump(address) => format!("Jumps to the address {address:#05X} plus V0"),
+            Opcode::LoadRandom((register, literal)) => format!("Sets V{register:X} to the result of a bitwise and operation on a random number (Typically: 0 to 255) and {literal:#04X}"),
+            Opcode::DrawSprite((register_x, register_y, literal)) => format!("Draws a sprite at coordinate (V{register_x:X}, V{register_y:X}) that has a width of 8 pixels and a height of {literal} pixels. VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen."),
+            Opcode::IfKey(register) => format!("Skips the next instruction if the key stored in V{register:X} is pressed (usually the next instruction is a jump to skip a code block)"),
+            Opcode::IfNotKey(register) => format!("Skips the next instruction if the key stored in V{register:X} is not pressed"),
+            Opcode::LoadFromDelayTimer(register) => format!("Sets V{register:X} to the value of the delay timer"),
+            Opcode::AwaitKey(register) => format!("A key press is awaited, and then stored in V{register:X} (blocking operation, all instruction halted until next key event)"),
+            Opcode::LoadDelayTimer(register) => format!("Sets the delay timer to V{register:X}"),
+            Opcode::LoadSoundTimer(register) => format!("Sets the sound timer to V{register:X}"),
+            Opcode::AddI(register) => format!("Adds V{register:X} to I. VF is not affected."),
+            Opcode::LoadSpriteAddress(register) => format!("Sets I to the location of the sprite for the character in V{register:X}. Characters 0-F (in hexadecimal) are represented by a 4x5 font."),
+            Opcode::BinaryCodedDecimal(register) => format!("Stores the binary-coded decimal representation of V{register:X}, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2."),
+            Opcode::StoreRegisters(register) => format!("Stores from V0 to V{register:X} (including V{register:X}) in memory, starting at address I"),
+            Opcode::LoadRegisters(register) => format!("Fills from V0 to V{register:X} (including V{register:X}) with values from memory, starting at address I"),
+        }
+    }
 }
 
 impl Chip8 {
@@ -558,6 +586,7 @@ impl Chip8 {
             stack: [0; 16],
             sp: 0,
             key: [0; 16],
+            vbuf: [0; 32],
             draw_flag: false,
             next_opcode: 0,
             loaded_rom: rom.clone(),
@@ -582,19 +611,19 @@ impl Chip8 {
         match Opcode::decode(self.opcode) {
             Ok(decoded_opcode) => match decoded_opcode {
                 Opcode::CallMachineCode(_address) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
                 Opcode::ClearDisplay => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    self.vbuf = [0; 32];
                 } // 	disp_clear() 	Clears the screen.
                 Opcode::Return => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //return; 	Returns from a subroutine.
                 Opcode::Jump(address) => {
                     self.pc = address;
                 } //goto NNN; 	Jumps to address NNN.
                 Opcode::Call(address) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //*(0xNNN)() 	Calls subroutine at NNN.
                 Opcode::IfLiteralEqual((register, literal)) => {
                     if self.v[register as usize] == literal {
@@ -662,19 +691,19 @@ impl Chip8 {
                     self.v[register as usize] = random::<u8>() & literal;
                 } //Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
                 Opcode::DrawSprite((register_x, register_y, literal)) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
                 Opcode::IfKey(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } // if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
                 Opcode::IfNotKey(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //if (key() != Vx) 	Skips the next instruction if the key stored in VX is not pressed (usually the next instruction is a jump to skip a code block).
                 Opcode::LoadFromDelayTimer(register) => {
                     self.v[register as usize] = self.delay_timer;
                 } //Vx = get_delay() 	Sets VX to the value of the delay timer.
                 Opcode::AwaitKey(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //Vx = get_key() 	A key press is awaited, and then stored in VX (blocking operation, all instruction halted until next key event).
                 Opcode::LoadDelayTimer(register) => {
                     self.delay_timer = self.v[register as usize];
@@ -686,10 +715,10 @@ impl Chip8 {
                     self.i += self.v[register as usize] as u16;
                 } //I += Vx 	Adds VX to I. VF is not affected.[c]
                 Opcode::LoadSpriteAddress(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //I = sprite_addr[Vx] 	Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
                 Opcode::BinaryCodedDecimal(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06x}", self.opcode);
+                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);  Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
                 Opcode::StoreRegisters(register) => {
                     self.memory[(self.i as usize)..(register + 1) as usize]
@@ -699,7 +728,7 @@ impl Chip8 {
                     .copy_from_slice(&self.memory[self.i as usize..]), //reg_load(Vx, &I) 	Fills from V0 to VX (including VX) with values from memory, starting at address I. The offset from I is increased by 1 for each value read, but I itself is left unmodified.[d]
             },
             Err(UnknownOpcode) => {
-                std::eprintln!("Unknown opcode {:#06x}", self.opcode);
+                std::eprintln!("Unknown opcode {:#06X}", self.opcode);
             }
         }
 
