@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use egui::{Color32, Pos2, Sense, Stroke};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use rand::prelude::*;
 
 static FONT_SET: [u8; 80] = [
@@ -113,18 +113,28 @@ impl eframe::App for Quip8App {
             let painter_size = ui.available_size();
             let (res, painter) = ui.allocate_painter(painter_size, Sense::hover());
 
+            let display_size = if res.rect.width() / 2.0 > res.rect.height() {
+                Vec2::new(res.rect.height() * 2.0, res.rect.height())
+            } else {
+                Vec2::new(res.rect.width(), res.rect.width() / 2.0)
+            };
+            let display_rect = Rect::from_center_size(res.rect.center(), display_size);
             for (row, row_data) in self.chip8.vbuf.iter().enumerate() {
                 for col in 0..64 {
                     if row_data & (1 << col) > 0 {
                         painter.rect_filled(
-                            egui::Rect {
+                            Rect {
                                 min: Pos2 {
-                                    x: res.rect.left() + painter_size.x / 64.0 * col as f32,
-                                    y: res.rect.top() + painter_size.y / 32.0 * row as f32,
+                                    x: display_rect.left()
+                                        + display_rect.width() / 64.0 * col as f32,
+                                    y: display_rect.top()
+                                        + display_rect.height() / 32.0 * row as f32,
                                 },
                                 max: Pos2 {
-                                    x: res.rect.left() + painter_size.x / 64.0 * (col + 1) as f32,
-                                    y: res.rect.top() + painter_size.y / 32.0 * (row + 1) as f32,
+                                    x: display_rect.left()
+                                        + display_rect.width() / 64.0 * (col + 1) as f32,
+                                    y: display_rect.top()
+                                        + display_rect.height() / 32.0 * (row + 1) as f32,
                                 },
                             },
                             0.0,
@@ -132,14 +142,18 @@ impl eframe::App for Quip8App {
                         );
                     } else {
                         painter.rect_stroke(
-                            egui::Rect {
+                            Rect {
                                 min: Pos2 {
-                                    x: res.rect.left() + painter_size.x / 64.0 * col as f32,
-                                    y: res.rect.top() + painter_size.y / 32.0 * row as f32,
+                                    x: display_rect.left()
+                                        + display_rect.width() / 64.0 * col as f32,
+                                    y: display_rect.top()
+                                        + display_rect.height() / 32.0 * row as f32,
                                 },
                                 max: Pos2 {
-                                    x: res.rect.left() + painter_size.x / 64.0 * (col + 1) as f32,
-                                    y: res.rect.top() + painter_size.y / 32.0 * (row + 1) as f32,
+                                    x: display_rect.left()
+                                        + display_rect.width() / 64.0 * (col + 1) as f32,
+                                    y: display_rect.top()
+                                        + display_rect.height() / 32.0 * (row + 1) as f32,
                                 },
                             },
                             0.0,
