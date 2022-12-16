@@ -61,7 +61,7 @@ impl eframe::App for Quip8App {
                     "Next opcode: {:#06X} - {}",
                     self.chip8.next_opcode,
                     Opcode::decode(self.chip8.next_opcode)
-                        .map_or("Unknown opcode".to_string(), |o| o.describe())
+                        .map_or("Unknown opcode".to_string(), |o| o.describe(&self.chip8))
                 ));
                 /*
                 if let Some(file) = &self.chip8.loaded_rom {
@@ -88,7 +88,7 @@ impl eframe::App for Quip8App {
 
                 for v in self.chip8.v.iter().enumerate() {
                     ui.label(format!("V{:X}", v.0));
-                    ui.label(format!("{:#04x}", v.1));
+                    ui.label(format!("{:#04X}", v.1));
                     ui.end_row();
                 }
             });
@@ -119,9 +119,9 @@ impl eframe::App for Quip8App {
                 Vec2::new(res.rect.width(), res.rect.width() / 2.0)
             };
             let display_rect = Rect::from_center_size(res.rect.center(), display_size);
-            for (row, row_data) in self.chip8.vbuf.iter().enumerate() {
+            for (row, row_data) in self.chip8.gfx.iter().enumerate() {
                 for col in 0..64 {
-                    if row_data & (1 << col) > 0 {
+                    if row_data & (1 << (64 - col - 1)) > 0 {
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
@@ -184,14 +184,12 @@ struct Chip8 {
     v: [u8; 16],
     i: u16,
     pc: u16,
-    gfx: [u8; 64 * 32],
+    gfx: [u64; 32],
     delay_timer: u8,
     sound_timer: u8,
     stack: [u16; 16],
     sp: u16,
     key: [u8; 16],
-
-    vbuf: [u64; 32],
 
     draw_flag: bool,
 
@@ -436,7 +434,7 @@ impl Opcode {
             ))),
             0x5000 => Ok(Opcode::IfEqual((
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
             ))),
             0x6000 => Ok(Opcode::LoadLiteral((
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
@@ -446,46 +444,46 @@ impl Opcode {
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 (raw_opcode & 0x00FF) as Literal,
             ))),
-            0x8000 => match raw_opcode & 0x000F {
+            0x4000 => match raw_opcode & 0x000F {
                 0x0000 => Ok(Opcode::Copy((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0001 => Ok(Opcode::Or((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0002 => Ok(Opcode::And((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0003 => Ok(Opcode::Xor((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0004 => Ok(Opcode::Add((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0005 => Ok(Opcode::Subtract((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
                 0x0006 => Ok(Opcode::BitshiftRightOne(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
                 0x0007 => Ok(Opcode::RevSub((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                    ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
-                0x0008 => Ok(Opcode::BitshiftLeftOne(
+                0x0004 => Ok(Opcode::BitshiftLeftOne(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
                 _ => Err(UnknownOpcode),
             },
             0x9000 => Ok(Opcode::IfNotEqual((
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
             ))),
             0xA000 => Ok(Opcode::LoadI((raw_opcode & 0x0FFF) as Address)),
             0xB000 => Ok(Opcode::OffsetJump((raw_opcode & 0x0FFF) as Address)),
@@ -495,7 +493,7 @@ impl Opcode {
             ))),
             0xD000 => Ok(Opcode::DrawSprite((
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                ((raw_opcode & 0x00F0) >> 6) as RegisterAddress,
+                ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 (raw_opcode & 0x000F) as Literal,
             ))),
             0xE000 => match raw_opcode & 0x00FF {
@@ -517,7 +515,7 @@ impl Opcode {
                 0x0015 => Ok(Opcode::LoadDelayTimer(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
-                0x0018 => Ok(Opcode::LoadSoundTimer(
+                0x0014 => Ok(Opcode::LoadSoundTimer(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
                 0x001E => Ok(Opcode::AddI(
@@ -542,7 +540,7 @@ impl Opcode {
         }
     }
 
-    fn describe(&self) -> String {
+    fn describe(&self, chip8: &Chip8) -> String {
         match self {
             Opcode::CallMachineCode(address) => format!(
                 "Call machine code routine (RCA 1802 for COSMAC VIP) at address {address:#05X}."),
@@ -562,7 +560,7 @@ impl Opcode {
             Opcode::And((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} and V{register_y:X}. (bitwise AND operation"),
             Opcode::Xor((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} xor V{register_y:X}."),
             Opcode::Add((register_x, register_y)) => format!("Adds V{register_y:X} to V{register_x:X}. VF is set to 1 when there's a carry, and to 0 when there is not."),
-            Opcode::Subtract((register_x, register_y)) => format!("V{register_y:X} is subtracted from V{register_x:X}. VF is set to 0 when there's a borrow, and 1 when there is not."),
+            Opcode::Subtract((register_x, register_y)) => format!("V{register_y:X} ({}) is subtracted from V{register_x:X} ({}). VF is set to 0 when there's a borrow, and 1 when there is not.", chip8.v[*register_x as usize], chip8.v[*register_y as usize]),
             Opcode::BitshiftRightOne(register) => format!("Stores the least significant bit of V{register:X} in VF and then shifts V{register:X} to the right by 1."),
             Opcode::RevSub((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_y:X} minus V{register_x:X}. VF is set to 0 when there's a borrow, and 1 when there is not."),
             Opcode::BitshiftLeftOne(register) => format!("Stores the most significant bit of V{register:X} in VF and then shifts V{register:X} to the left by 1"),
@@ -570,7 +568,7 @@ impl Opcode {
             Opcode::LoadI(address) => format!("Sets I to the address {address:#05X}"),
             Opcode::OffsetJump(address) => format!("Jumps to the address {address:#05X} plus V0"),
             Opcode::LoadRandom((register, literal)) => format!("Sets V{register:X} to the result of a bitwise and operation on a random number (Typically: 0 to 255) and {literal:#04X}"),
-            Opcode::DrawSprite((register_x, register_y, literal)) => format!("Draws a sprite at coordinate (V{register_x:X}, V{register_y:X}) that has a width of 8 pixels and a height of {literal} pixels. VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen."),
+            Opcode::DrawSprite((register_x, register_y, literal)) => format!("Draws an 8x{literal} sprite at coordinate (V{register_x:X} ({}), V{register_y:X} ({})).", chip8.v[*register_x as usize], chip8.v[*register_y as usize]),
             Opcode::IfKey(register) => format!("Skips the next instruction if the key stored in V{register:X} is pressed (usually the next instruction is a jump to skip a code block)"),
             Opcode::IfNotKey(register) => format!("Skips the next instruction if the key stored in V{register:X} is not pressed"),
             Opcode::LoadFromDelayTimer(register) => format!("Sets V{register:X} to the value of the delay timer"),
@@ -594,13 +592,12 @@ impl Chip8 {
             v: [0; 16],
             i: 0,
             pc: 0x200,
-            gfx: [0; 64 * 32],
+            gfx: [0; 32],
             delay_timer: 0,
             sound_timer: 0,
             stack: [0; 16],
             sp: 0,
             key: [0; 16],
-            vbuf: [0; 32],
             draw_flag: false,
             next_opcode: 0,
             loaded_rom: rom.clone(),
@@ -628,7 +625,7 @@ impl Chip8 {
                     std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
                 Opcode::ClearDisplay => {
-                    self.vbuf = [0; 32];
+                    self.gfx = [0; 32];
                 } // 	disp_clear() 	Clears the screen.
                 Opcode::Return => {
                     std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
@@ -705,7 +702,14 @@ impl Chip8 {
                     self.v[register as usize] = random::<u8>() & literal;
                 } //Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
                 Opcode::DrawSprite((register_x, register_y, literal)) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    for i in 0..literal {
+                        if register_y as usize + i as usize >= self.gfx.len() {
+                            break;
+                        }
+                        self.gfx[(self.v[register_y as usize] + i) as usize] ^=
+                            (self.memory[(self.i + i as u16) as usize] as u64)
+                                << (64 - 8 - self.v[register_x as usize]);
+                    }
                 } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
                 Opcode::IfKey(register) => {
                     std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
