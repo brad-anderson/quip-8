@@ -3,6 +3,7 @@
 use eframe::egui;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use rand::prelude::*;
+use std::cmp;
 
 static FONT_SET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -56,6 +57,11 @@ impl eframe::App for Quip8App {
             ui.add_enabled_ui(self.chip8.loaded_rom.is_some(), |ui| {
                 if ui.button("Step").clicked() {
                     self.chip8.emulate_cycle();
+                }
+                if ui.button("Step 5").clicked() {
+                    for _ in 0..5 {
+                        self.chip8.emulate_cycle();
+                    }
                 }
                 ui.label(format!(
                     "Next opcode: {:#06X} - {}",
@@ -702,15 +708,22 @@ impl Chip8 {
                     self.v[register as usize] = random::<u8>() & literal;
                 } //Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
                 Opcode::DrawSprite((register_x, register_y, literal)) => {
-                    for i in 0..literal {
-                        if register_y as usize + i as usize >= self.gfx.len() {
-                            break;
-                        }
-                        self.gfx[(self.v[register_y as usize] + i) as usize] ^=
-                            (self.memory[(self.i + i as u16) as usize] as u64)
-                                << (64 - 8 - self.v[register_x as usize]);
+                    let x = self.v[register_x as usize] as usize % 64;
+                    let y = self.v[register_y as usize] as usize % 32;
+                    let height = cmp::min(literal + y as u8, 31) as usize - y;
+                    let mut bit_unset = 0;
+                    for i in 0..height {
+                        let current_row = self.gfx[y + i];
+                        let current_wide_row = (current_row as u128) << 64;
+                        let sprite_wide_row =
+                            (self.memory[self.i as usize + i] as u128) << (128 - 8 - x);
+                        self.gfx[y + i] = ((current_wide_row ^ sprite_wide_row) >> 64) as u64;
+                        bit_unset |= (current_row ^ self.gfx[y + i]) & current_row;
                     }
-                } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
+                    self.v[0xf] = if bit_unset != 0 { 1 } else { 0 };
+                } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
+                //  Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction.
+                //  As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
                 Opcode::IfKey(register) => {
                     std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } // if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
