@@ -4,7 +4,9 @@ use eframe::egui;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use rand::prelude::*;
 use std::cmp;
+use std::num::Wrapping;
 
+const FONT_START_ADDRESS: u16 = 0x0;
 static FONT_SET: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -183,17 +185,20 @@ impl eframe::App for Quip8App {
     }
 }
 
-#[allow(dead_code)]
+type Address = u16;
+type RegisterAddress = u8;
+type Literal = u8;
+
 struct Chip8 {
     opcode: u16,
     memory: [u8; 4096],
     v: [u8; 16],
     i: u16,
-    pc: u16,
+    pc: Address,
     gfx: [u64; 32],
     delay_timer: u8,
     sound_timer: u8,
-    stack: [u16; 16],
+    stack: [Address; 16],
     sp: u16,
     key: [u8; 16],
 
@@ -209,10 +214,6 @@ impl Default for Chip8 {
         Self::new(None)
     }
 }
-
-type Address = u16;
-type RegisterAddress = u8;
-type Literal = u8;
 
 enum Opcode {
     // 0x0NNN - Call
@@ -450,7 +451,7 @@ impl Opcode {
                 ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 (raw_opcode & 0x00FF) as Literal,
             ))),
-            0x4000 => match raw_opcode & 0x000F {
+            0x8000 => match raw_opcode & 0x000F {
                 0x0000 => Ok(Opcode::Copy((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                     ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
@@ -521,7 +522,7 @@ impl Opcode {
                 0x0015 => Ok(Opcode::LoadDelayTimer(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
-                0x0014 => Ok(Opcode::LoadSoundTimer(
+                0x0018 => Ok(Opcode::LoadSoundTimer(
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                 )),
                 0x001E => Ok(Opcode::AddI(
@@ -634,13 +635,16 @@ impl Chip8 {
                     self.gfx = [0; 32];
                 } // 	disp_clear() 	Clears the screen.
                 Opcode::Return => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    self.pc = self.stack[self.sp as usize];
+                    self.sp -= 1;
                 } //return; 	Returns from a subroutine.
                 Opcode::Jump(address) => {
                     self.pc = address;
                 } //goto NNN; 	Jumps to address NNN.
                 Opcode::Call(address) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    self.sp += 1;
+                    self.stack[self.sp as usize] = self.pc;
+                    self.pc = address;
                 } //*(0xNNN)() 	Calls subroutine at NNN.
                 Opcode::IfLiteralEqual((register, literal)) => {
                     if self.v[register as usize] == literal {
@@ -661,7 +665,8 @@ impl Chip8 {
                     self.v[register as usize] = literal;
                 }
                 Opcode::AddLiteral((register, literal)) => {
-                    self.v[register as usize] += literal;
+                    self.v[register as usize] =
+                        (Wrapping(self.v[register as usize]) + Wrapping(literal)).0;
                 } //Vx += NN 	Adds NN to VX (carry flag is not changed).
                 Opcode::Copy((register_x, register_y)) => {
                     self.v[register_x as usize] = self.v[register_y as usize];
@@ -676,10 +681,18 @@ impl Chip8 {
                     self.v[register_x as usize] ^= self.v[register_y as usize];
                 } // Vx ^= Vy 	Sets VX to VX xor VY.
                 Opcode::Add((register_x, register_y)) => {
-                    self.v[register_x as usize] += self.v[register_y as usize];
+                    let a = self.v[register_x as usize];
+                    let b = self.v[register_y as usize];
+                    let result = Wrapping(a) + Wrapping(b);
+                    self.v[register_x as usize] = result.0;
+                    self.v[0xF] = (a as u32 + b as u32 > u8::MAX as u32) as u8;
                 } // Vx += Vy 	Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there is not.
                 Opcode::Subtract((register_x, register_y)) => {
-                    self.v[register_x as usize] -= self.v[register_y as usize];
+                    let a = self.v[register_x as usize];
+                    let b = self.v[register_y as usize];
+                    let result = Wrapping(a) - Wrapping(b);
+                    self.v[register_x as usize] = result.0;
+                    self.v[0xF] = ((a as i32 - b as i32) < 0) as u8;
                 } // Vx -= Vy 	VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there is not.
                 Opcode::BitshiftRightOne(register) => {
                     self.v[0xf] = self.v[register as usize] & 1;
@@ -720,15 +733,19 @@ impl Chip8 {
                         self.gfx[y + i] = ((current_wide_row ^ sprite_wide_row) >> 64) as u64;
                         bit_unset |= (current_row ^ self.gfx[y + i]) & current_row;
                     }
-                    self.v[0xf] = if bit_unset != 0 { 1 } else { 0 };
+                    self.v[0xf] = (bit_unset != 0) as u8;
                 } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
                 //  Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction.
                 //  As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
                 Opcode::IfKey(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    if self.key[self.v[register as usize] as usize] != 0 {
+                        self.pc += 2;
+                    }
                 } // if (key() == Vx) 	Skips the next instruction if the key stored in VX is pressed (usually the next instruction is a jump to skip a code block).
                 Opcode::IfNotKey(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    if self.key[self.v[register as usize] as usize] == 0 {
+                        self.pc += 2;
+                    }
                 } //if (key() != Vx) 	Skips the next instruction if the key stored in VX is not pressed (usually the next instruction is a jump to skip a code block).
                 Opcode::LoadFromDelayTimer(register) => {
                     self.v[register as usize] = self.delay_timer;
@@ -746,17 +763,22 @@ impl Chip8 {
                     self.i += self.v[register as usize] as u16;
                 } //I += Vx 	Adds VX to I. VF is not affected.[c]
                 Opcode::LoadSpriteAddress(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
+                    self.i = FONT_START_ADDRESS + self.v[register as usize] as u16;
                 } //I = sprite_addr[Vx] 	Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
                 Opcode::BinaryCodedDecimal(register) => {
-                    std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
-                } // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);  Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
+                    self.memory[self.i as usize] = self.v[register as usize] / 100;
+                    self.memory[(self.i + 1) as usize] = self.v[register as usize] / 10 % 10;
+                    self.memory[(self.i + 2) as usize] = (self.v[register as usize] % 100) % 10;
+                } // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);
+                // Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
                 Opcode::StoreRegisters(register) => {
                     self.memory[(self.i as usize)..(register + 1) as usize]
                         .copy_from_slice(self.v.as_slice());
                 } //reg_dump(Vx, &I) 	Stores from V0 to VX (including VX) in memory, starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
                 Opcode::LoadRegisters(register) => self.v[..(register + 1) as usize]
-                    .copy_from_slice(&self.memory[self.i as usize..]), //reg_load(Vx, &I) 	Fills from V0 to VX (including VX) with values from memory, starting at address I. The offset from I is increased by 1 for each value read, but I itself is left unmodified.[d]
+                    .copy_from_slice(
+                        &self.memory[self.i as usize..(self.i + register as u16 + 1) as usize],
+                    ), //reg_load(Vx, &I) 	Fills from V0 to VX (including VX) with values from memory, starting at address I. The offset from I is increased by 1 for each value read, but I itself is left unmodified.[d]
             },
             Err(UnknownOpcode) => {
                 std::eprintln!("Unknown opcode {:#06X}", self.opcode);
@@ -766,7 +788,12 @@ impl Chip8 {
         // execute opcode
 
         // update timers
-
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
         self.next_opcode =
             (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
     }
