@@ -29,6 +29,7 @@ static FONT_SET: [u8; 80] = [
 #[derive(Default)]
 struct Quip8App {
     chip8: Chip8,
+    paused: bool,
 }
 
 impl Quip8App {
@@ -37,6 +38,7 @@ impl Quip8App {
         // egui customizations go here
         Self {
             chip8: Chip8::new(initial_rom),
+            paused: true,
             ..Self::default()
         }
     }
@@ -44,6 +46,7 @@ impl Quip8App {
 
 impl eframe::App for Quip8App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut run_cycles = if !self.paused { 1 } else { 0 };
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             use egui::menu;
             menu::bar(ui, |ui| {
@@ -57,14 +60,24 @@ impl eframe::App for Quip8App {
 
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
             ui.add_enabled_ui(self.chip8.loaded_rom.is_some(), |ui| {
-                if ui.button("Step").clicked() {
-                    self.chip8.emulate_cycle();
-                }
-                if ui.button("Step 5").clicked() {
-                    for _ in 0..5 {
-                        self.chip8.emulate_cycle();
-                    }
-                }
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(!self.paused, |ui| {
+                        if ui.button("Pause").clicked() {
+                            self.paused = !self.paused;
+                        }
+                    });
+                    ui.add_enabled_ui(self.paused, |ui| {
+                        if ui.button("Continue").clicked() {
+                            self.paused = !self.paused;
+                        }
+                        if ui.button("Step").clicked() {
+                            run_cycles = 1;
+                        }
+                        if ui.button("Step 5").clicked() {
+                            run_cycles = 5;
+                        }
+                    });
+                });
                 ui.label(format!(
                     "Next opcode: {:#06X} - {}",
                     self.chip8.next_opcode,
@@ -182,6 +195,13 @@ impl eframe::App for Quip8App {
             self.chip8.set_keys();
         }
         */
+        for _ in 0..run_cycles {
+            self.chip8.emulate_cycle();
+        }
+
+        if run_cycles > 0 {
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -305,7 +325,7 @@ enum Opcode {
     // Stores the least significant bit of VX in VF and then shifts VX to the
     // right by 1.
     // Better Name?
-    BitshiftRightOne(RegisterAddress),
+    BitshiftRightOne((RegisterAddress, RegisterAddress)),
 
     // 0x8XY7 - Math
     // C Pseudo: Vx = Vy - Vx
@@ -319,7 +339,7 @@ enum Opcode {
     // Stores the most significant bit of VX in VF and then shifts VX to the
     // left by 1.
     // Better Name?
-    BitshiftLeftOne(RegisterAddress),
+    BitshiftLeftOne((RegisterAddress, RegisterAddress)),
 
     // 0x9XY0 - Cond
     // C Pseudo: if (Vx != Vy)
@@ -476,16 +496,18 @@ impl Opcode {
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                     ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
-                0x0006 => Ok(Opcode::BitshiftRightOne(
+                0x0006 => Ok(Opcode::BitshiftRightOne((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                )),
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
+                ))),
                 0x0007 => Ok(Opcode::RevSub((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
                     ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
                 ))),
-                0x0004 => Ok(Opcode::BitshiftLeftOne(
+                0x000E => Ok(Opcode::BitshiftLeftOne((
                     ((raw_opcode & 0x0F00) >> 8) as RegisterAddress,
-                )),
+                    ((raw_opcode & 0x00F0) >> 4) as RegisterAddress,
+                ))),
                 _ => Err(UnknownOpcode),
             },
             0x9000 => Ok(Opcode::IfNotEqual((
@@ -568,9 +590,9 @@ impl Opcode {
             Opcode::Xor((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_x:X} xor V{register_y:X}."),
             Opcode::Add((register_x, register_y)) => format!("Adds V{register_y:X} to V{register_x:X}. VF is set to 1 when there's a carry, and to 0 when there is not."),
             Opcode::Subtract((register_x, register_y)) => format!("V{register_y:X} ({}) is subtracted from V{register_x:X} ({}). VF is set to 0 when there's a borrow, and 1 when there is not.", chip8.v[*register_x as usize], chip8.v[*register_y as usize]),
-            Opcode::BitshiftRightOne(register) => format!("Stores the least significant bit of V{register:X} in VF and then shifts V{register:X} to the right by 1."),
+            Opcode::BitshiftRightOne((register_x, register_y)) => format!("Stores the least significant bit of V{register_x:X} in VF and then shifts V{register_x:X} to the right by 1."),
             Opcode::RevSub((register_x, register_y)) => format!("Sets V{register_x:X} to V{register_y:X} minus V{register_x:X}. VF is set to 0 when there's a borrow, and 1 when there is not."),
-            Opcode::BitshiftLeftOne(register) => format!("Stores the most significant bit of V{register:X} in VF and then shifts V{register:X} to the left by 1"),
+            Opcode::BitshiftLeftOne((register_x, register_y)) => format!("Stores the most significant bit of V{register_x:X} in VF and then shifts V{register_x:X} to the left by 1"),
             Opcode::IfNotEqual((register_x, register_y)) => format!("Skips the next instruction if V{register_x:X} does not equal V{register_y:X}"),
             Opcode::LoadI(address) => format!("Sets I to the address {address:#05X}"),
             Opcode::OffsetJump(address) => format!("Jumps to the address {address:#05X} plus V0"),
@@ -694,17 +716,17 @@ impl Chip8 {
                     self.v[register_x as usize] = result.0;
                     self.v[0xF] = ((a as i32 - b as i32) < 0) as u8;
                 } // Vx -= Vy 	VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there is not.
-                Opcode::BitshiftRightOne(register) => {
-                    self.v[0xf] = self.v[register as usize] & 1;
-                    self.v[register as usize] >>= 1;
+                Opcode::BitshiftRightOne((register_x, register_y)) => {
+                    self.v[0xF] = self.v[register_y as usize] & 1;
+                    self.v[register_x as usize] = self.v[register_y as usize] >> 1;
                 } // Vx >>= 1 	Stores the least significant bit of VX in VF and then shifts VX to the right by 1.[b]
                 Opcode::RevSub((register_x, register_y)) => {
                     self.v[register_x as usize] =
                         self.v[register_y as usize] - self.v[register_x as usize];
                 } // Vx = Vy - Vx 	Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there is not.
-                Opcode::BitshiftLeftOne(register) => {
-                    self.v[0xf] = self.v[register as usize] & 0xF0;
-                    self.v[register as usize] <<= 1;
+                Opcode::BitshiftLeftOne((register_x, register_y)) => {
+                    self.v[0xF] = self.v[register_y as usize] & 0xF0;
+                    self.v[register_x as usize] = self.v[register_y as usize] << 1;
                 } // Vx <<= 1 	Stores the most significant bit of VX in VF and then shifts VX to the left by 1.[b]
                 Opcode::IfNotEqual((register_x, register_y)) => {
                     if self.v[register_x as usize] != self.v[register_y as usize] {
@@ -772,8 +794,8 @@ impl Chip8 {
                 } // set_BCD(Vx) *(I+0) = BCD(3); *(I+1) = BCD(2); *(I+2) = BCD(1);
                 // Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
                 Opcode::StoreRegisters(register) => {
-                    self.memory[(self.i as usize)..(register + 1) as usize]
-                        .copy_from_slice(self.v.as_slice());
+                    self.memory[(self.i as usize)..(self.i + register as u16 + 1) as usize]
+                        .copy_from_slice(&self.v[0..(register + 1) as usize]);
                 } //reg_dump(Vx, &I) 	Stores from V0 to VX (including VX) in memory, starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
                 Opcode::LoadRegisters(register) => self.v[..(register + 1) as usize]
                     .copy_from_slice(
@@ -797,10 +819,9 @@ impl Chip8 {
         self.next_opcode =
             (self.memory[self.pc as usize] as u16) << 8 | self.memory[self.pc as usize + 1] as u16;
     }
+
     fn set_keys(&self) {}
 }
-
-fn draw_graphics() {}
 
 fn main() {
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
