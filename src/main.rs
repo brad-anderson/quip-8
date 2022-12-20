@@ -1,10 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use rand::prelude::*;
 use std::cmp;
-use std::num::Wrapping;
 
 const FONT_START_ADDRESS: u16 = 0x0;
 static FONT_SET: [u8; 80] = [
@@ -101,7 +100,6 @@ impl eframe::App for Quip8App {
             egui::Grid::new("registers").show(ui, |ui| {
                 ui.label("PC");
                 ui.label(format!("{:#05X}", self.chip8.pc));
-                ui.end_row();
 
                 ui.label("I");
                 ui.label(format!("{:#05X}", self.chip8.i));
@@ -110,7 +108,9 @@ impl eframe::App for Quip8App {
                 for v in self.chip8.v.iter().enumerate() {
                     ui.label(format!("V{:X}", v.0));
                     ui.label(format!("{:#04X}", v.1));
-                    ui.end_row();
+                    if v.0 % 2 == 1 {
+                        ui.end_row();
+                    }
                 }
             });
 
@@ -128,6 +128,17 @@ impl eframe::App for Quip8App {
 
         egui::SidePanel::right("memory").show(ctx, |ui| {
             ui.heading("Memory");
+            for i in 0..5 {
+                ui.label(
+                    RichText::new(format!(
+                        "{:#05X} {:04X}",
+                        self.chip8.pc + i * 2,
+                        (self.chip8.memory[(self.chip8.pc + i * 2) as usize] as u16) << 8
+                            | self.chip8.memory[(self.chip8.pc + i * 2) as usize + 1] as u16
+                    ))
+                    .monospace(),
+                );
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -688,7 +699,7 @@ impl Chip8 {
                 }
                 Opcode::AddLiteral((register, literal)) => {
                     self.v[register as usize] =
-                        (Wrapping(self.v[register as usize]) + Wrapping(literal)).0;
+                        (self.v[register as usize] as u16 + literal as u16) as u8;
                 } //Vx += NN 	Adds NN to VX (carry flag is not changed).
                 Opcode::Copy((register_x, register_y)) => {
                     self.v[register_x as usize] = self.v[register_y as usize];
@@ -703,18 +714,16 @@ impl Chip8 {
                     self.v[register_x as usize] ^= self.v[register_y as usize];
                 } // Vx ^= Vy 	Sets VX to VX xor VY.
                 Opcode::Add((register_x, register_y)) => {
-                    let a = self.v[register_x as usize];
-                    let b = self.v[register_y as usize];
-                    let result = Wrapping(a) + Wrapping(b);
-                    self.v[register_x as usize] = result.0;
-                    self.v[0xF] = (a as u32 + b as u32 > u8::MAX as u32) as u8;
+                    let (result, overflow) =
+                        self.v[register_x as usize].overflowing_add(self.v[register_y as usize]);
+                    self.v[register_x as usize] = result;
+                    self.v[0xF] = overflow as u8;
                 } // Vx += Vy 	Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there is not.
                 Opcode::Subtract((register_x, register_y)) => {
-                    let a = self.v[register_x as usize];
-                    let b = self.v[register_y as usize];
-                    let result = Wrapping(a) - Wrapping(b);
-                    self.v[register_x as usize] = result.0;
-                    self.v[0xF] = ((a as i32 - b as i32) < 0) as u8;
+                    let (result, overflow) =
+                        self.v[register_x as usize].overflowing_sub(self.v[register_y as usize]);
+                    self.v[register_x as usize] = result;
+                    self.v[0xF] = overflow as u8;
                 } // Vx -= Vy 	VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there is not.
                 Opcode::BitshiftRightOne((register_x, register_y)) => {
                     self.v[0xF] = self.v[register_y as usize] & 1;
@@ -745,7 +754,7 @@ impl Chip8 {
                 Opcode::DrawSprite((register_x, register_y, literal)) => {
                     let x = self.v[register_x as usize] as usize % 64;
                     let y = self.v[register_y as usize] as usize % 32;
-                    let height = cmp::min(literal + y as u8, 31) as usize - y;
+                    let height = cmp::min(literal + y as u8, 32) as usize - y;
                     let mut bit_unset = 0;
                     for i in 0..height {
                         let current_row = self.gfx[y + i];
@@ -755,7 +764,7 @@ impl Chip8 {
                         self.gfx[y + i] = ((current_wide_row ^ sprite_wide_row) >> 64) as u64;
                         bit_unset |= (current_row ^ self.gfx[y + i]) & current_row;
                     }
-                    self.v[0xf] = (bit_unset != 0) as u8;
+                    self.v[0xF] = (bit_unset != 0) as u8;
                 } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
                 //  Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction.
                 //  As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
