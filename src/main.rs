@@ -25,6 +25,11 @@ static FONT_SET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
+const PRIMARY_COLOR: Color32 = Color32::from_rgb(2, 238, 179);
+const COMPLEMENTARY_COLOR: Color32 = Color32::from_rgb(238, 2, 61);
+const ANALAGOUS1_COLOR: Color32 = Color32::from_rgb(2, 238, 61);
+const ANALAGOUS2_COLOR: Color32 = Color32::from_rgb(2, 179, 238);
+
 #[derive(Default)]
 struct Quip8App {
     chip8: Chip8,
@@ -89,30 +94,97 @@ impl eframe::App for Quip8App {
                         // …
                     }
                 });
+                ui.separator();
+                ui.add_enabled_ui(!self.paused, |ui| {
+                    if ui.button("Pause").clicked() {
+                        self.paused = !self.paused;
+                    }
+                });
+                ui.add_enabled_ui(self.paused, |ui| {
+                    if ui.button("Run").clicked() {
+                        self.paused = !self.paused;
+                    }
+                    if ui.button("Step").clicked() {
+                        run_cycles = 1;
+                    }
+                    if ui.button("Step 5").clicked() {
+                        run_cycles = 5;
+                    }
+                });
             });
         });
 
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
             ui.add_enabled_ui(self.chip8.loaded_rom.is_some(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!self.paused, |ui| {
-                        if ui.button("Pause").clicked() {
-                            self.paused = !self.paused;
+                    egui::Grid::new("registers").show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("PC").monospace());
+                            ui.label(
+                                RichText::new(format!("{:03X}", self.chip8.pc))
+                                    .monospace()
+                                    .color(ANALAGOUS2_COLOR),
+                            );
+                            ui.separator();
+                        });
+
+                        for v in self.chip8.v[0..8].iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("V{:X}", v.0)).monospace());
+                                ui.label(
+                                    RichText::new(format!("{:02X}", v.1))
+                                        .monospace()
+                                        .color(ANALAGOUS2_COLOR),
+                                );
+                                ui.separator();
+                            });
                         }
-                    });
-                    ui.add_enabled_ui(self.paused, |ui| {
-                        if ui.button("Continue").clicked() {
-                            self.paused = !self.paused;
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("DELAY").monospace());
+                            ui.label(
+                                RichText::new(format!("{:02X}", self.chip8.delay_timer))
+                                    .monospace()
+                                    .color(ANALAGOUS2_COLOR),
+                            );
+                            ui.separator();
+                        });
+                        ui.end_row();
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("I ").monospace());
+                            ui.label(
+                                RichText::new(format!("{:03X}", self.chip8.i))
+                                    .monospace()
+                                    .color(ANALAGOUS2_COLOR),
+                            );
+                            ui.separator();
+                        });
+
+                        for v in self.chip8.v[8..].iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("V{:X}", v.0 + 8)).monospace());
+                                ui.label(
+                                    RichText::new(format!("{:02X}", v.1))
+                                        .monospace()
+                                        .color(ANALAGOUS2_COLOR),
+                                );
+                                ui.separator();
+                            });
                         }
-                        if ui.button("Step").clicked() {
-                            run_cycles = 1;
-                        }
-                        if ui.button("Step 5").clicked() {
-                            run_cycles = 5;
-                        }
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("SOUND").monospace());
+                            ui.label(
+                                RichText::new(format!("{:02X}", self.chip8.sound_timer))
+                                    .monospace()
+                                    .color(ANALAGOUS2_COLOR),
+                            );
+                            ui.separator();
+                            ui.end_row();
+                        });
+                        ui.end_row();
                     });
                 });
-                let raw_opcode = (self.chip8.memory[self.chip8.pc as usize] as u16) << 8
+                /*let raw_opcode = (self.chip8.memory[self.chip8.pc as usize] as u16) << 8
                     | self.chip8.memory[(self.chip8.pc + 1) as usize] as u16;
                 ui.label(format!(
                     "Next opcode: {:#06X} - {}",
@@ -120,6 +192,7 @@ impl eframe::App for Quip8App {
                     Opcode::decode(raw_opcode)
                         .map_or("Unknown opcode".to_string(), |o| o.describe(&self.chip8))
                 ));
+                */
                 /*
                 if let Some(file) = &self.chip8.loaded_rom {
                     ui.heading(
@@ -132,87 +205,11 @@ impl eframe::App for Quip8App {
             });
         });
 
-        egui::SidePanel::left("registers").show(ctx, |ui| {
-            ui.heading("Registers");
-            egui::Grid::new("registers").show(ui, |ui| {
-                ui.label("PC");
-                ui.label(format!("{:#05X}", self.chip8.pc));
-
-                ui.label("I");
-                ui.label(format!("{:#05X}", self.chip8.i));
-                ui.end_row();
-
-                for v in self.chip8.v.iter().enumerate() {
-                    ui.label(format!("V{:X}", v.0));
-                    ui.label(format!("{:#04X}", v.1));
-                    if v.0 % 2 == 1 {
-                        ui.end_row();
-                    }
-                }
-            });
-
-            ui.heading("Timers");
-            egui::Grid::new("timers").show(ui, |ui| {
-                ui.label("Delay");
-                ui.label(format!("{:#04X}", self.chip8.delay_timer));
-                ui.end_row();
-
-                ui.label("Sound");
-                ui.label(format!("{:#04X}", self.chip8.sound_timer));
-                ui.end_row();
-            });
-        });
-
         egui::SidePanel::right("memory").show(ctx, |ui| {
-            ui.heading("Instructions");
-            for i in 0..12 {
-                let pc = (self.chip8.pc as i64 + (i as i16 - 3) as i64 * 2) as usize;
-                let raw_opcode =
-                    (self.chip8.memory[pc] as u16) << 8 | self.chip8.memory[pc + 1] as u16;
-                let opcode_maybe = Opcode::decode(raw_opcode);
-                if let Ok(opcode) = opcode_maybe {
-                    ui.label(
-                        RichText::new(format!(
-                            "{}{:03X} {:5} {:3} {:2} {:2}",
-                            if pc == self.chip8.pc as usize {
-                                "\u{2794}"
-                            } else {
-                                " "
-                            },
-                            pc,
-                            opcode.mnemonic(),
-                            opcode
-                                .operand(0)
-                                .map_or("".to_owned(), |o| format!("{:3X}", o)),
-                            opcode
-                                .operand(1)
-                                .map_or("".to_owned(), |o| format!("{:2X}", o)),
-                            opcode
-                                .operand(2)
-                                .map_or("".to_owned(), |o| format!("{:2X}", o)),
-                        ))
-                        .monospace(),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new(format!(
-                            "{}{:03X} UNKNOWN {:#06X}",
-                            if pc == self.chip8.pc as usize {
-                                "\u{2794}"
-                            } else {
-                                " "
-                            },
-                            pc,
-                            raw_opcode
-                        ))
-                        .monospace(),
-                    );
-                }
-            }
             ui.heading("Keys");
             let key_color = |key: u32| {
                 if self.chip8.keys & (1 << key) != 0 {
-                    Color32::WHITE
+                    COMPLEMENTARY_COLOR
                 } else {
                     Color32::GRAY
                 }
@@ -242,6 +239,65 @@ impl eframe::App for Quip8App {
                 ui.colored_label(key_color(15), "V");
                 ui.end_row();
             });
+            ui.separator();
+            ui.heading("Instructions");
+            for i in 0..12 {
+                let pc = (self.chip8.pc as i64 + (i as i16 - 3) as i64 * 2) as usize;
+                let raw_opcode =
+                    (self.chip8.memory[pc] as u16) << 8 | self.chip8.memory[pc + 1] as u16;
+                let opcode_maybe = Opcode::decode(raw_opcode);
+                if let Ok(opcode) = opcode_maybe {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}{:03X} {:5} {:3} {:2} {:2}",
+                            if pc == self.chip8.pc as usize {
+                                "\u{2794}"
+                            } else {
+                                " "
+                            },
+                            pc,
+                            opcode.mnemonic(),
+                            opcode
+                                .operand(0)
+                                .map_or("".to_owned(), |o| format!("{:3X}", o)),
+                            opcode
+                                .operand(1)
+                                .map_or("".to_owned(), |o| format!("{:2X}", o)),
+                            opcode
+                                .operand(2)
+                                .map_or("".to_owned(), |o| format!("{:2X}", o)),
+                        ))
+                        .color(ANALAGOUS2_COLOR)
+                        .monospace(),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}{:03X} UNKNOWN {:#06X}",
+                            if pc == self.chip8.pc as usize {
+                                "\u{2794}"
+                            } else {
+                                " "
+                            },
+                            pc,
+                            raw_opcode
+                        ))
+                        .monospace(),
+                    );
+                }
+            }
+            ui.separator();
+            ui.heading("Stack");
+            for i in 0..self.chip8.sp {
+                ui.label(
+                    RichText::new(format!(
+                        "{:03X}",
+                        self.chip8.stack[(self.chip8.sp - i) as usize]
+                    ))
+                    .color(ANALAGOUS2_COLOR)
+                    .monospace(),
+                );
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -274,7 +330,7 @@ impl eframe::App for Quip8App {
                                 },
                             },
                             0.0,
-                            Color32::DARK_GREEN,
+                            PRIMARY_COLOR,
                         );
                     } else {
                         painter.rect_stroke(
