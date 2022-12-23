@@ -24,6 +24,10 @@ static FONT_SET: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+const FIRST_INSTRUCTION_ADDRESS: u16 = 0x200;
+const DISPLAY_HEIGHT: usize = 32;
+const DISPLAY_WIDTH: usize = 64;
+const PIXEL_ERASE_CYCLE_DELAY: u8 = 8;
 
 const PRIMARY_COLOR: Color32 = Color32::from_rgb(2, 238, 179);
 const COMPLEMENTARY_COLOR: Color32 = Color32::from_rgb(238, 2, 61);
@@ -312,21 +316,32 @@ impl eframe::App for Quip8App {
             let display_rect = Rect::from_center_size(res.rect.center(), display_size);
             painter.rect_filled(display_rect, 0.0, Color32::from_rgb(5, 10, 5));
             for (row, row_data) in self.chip8.gfx.iter().enumerate() {
-                for col in 0..64 {
-                    if row_data & (1 << (64 - col - 1)) > 0 {
+                for col in 0..DISPLAY_WIDTH {
+                    if (row_data
+                        | (if self.chip8.last_gfx_ttl > 0 {
+                            self.chip8.last_gfx[row]
+                        } else {
+                            0
+                        }))
+                        & (1 << (DISPLAY_WIDTH - col - 1))
+                        > 0
+                    {
                         painter.rect_filled(
                             Rect {
                                 min: Pos2 {
                                     x: display_rect.left()
-                                        + display_rect.width() / 64.0 * col as f32,
+                                        + display_rect.width() / DISPLAY_WIDTH as f32 * col as f32,
                                     y: display_rect.top()
-                                        + display_rect.height() / 32.0 * row as f32,
+                                        + display_rect.height() / DISPLAY_HEIGHT as f32
+                                            * row as f32,
                                 },
                                 max: Pos2 {
                                     x: display_rect.left()
-                                        + display_rect.width() / 64.0 * (col + 1) as f32,
+                                        + display_rect.width() / DISPLAY_WIDTH as f32
+                                            * (col + 1) as f32,
                                     y: display_rect.top()
-                                        + display_rect.height() / 32.0 * (row + 1) as f32,
+                                        + display_rect.height() / DISPLAY_HEIGHT as f32
+                                            * (row + 1) as f32,
                                 },
                             },
                             0.0,
@@ -337,15 +352,18 @@ impl eframe::App for Quip8App {
                             Rect {
                                 min: Pos2 {
                                     x: display_rect.left()
-                                        + display_rect.width() / 64.0 * col as f32,
+                                        + display_rect.width() / DISPLAY_WIDTH as f32 * col as f32,
                                     y: display_rect.top()
-                                        + display_rect.height() / 32.0 * row as f32,
+                                        + display_rect.height() / DISPLAY_HEIGHT as f32
+                                            * row as f32,
                                 },
                                 max: Pos2 {
                                     x: display_rect.left()
-                                        + display_rect.width() / 64.0 * (col + 1) as f32,
+                                        + display_rect.width() / DISPLAY_WIDTH as f32
+                                            * (col + 1) as f32,
                                     y: display_rect.top()
-                                        + display_rect.height() / 32.0 * (row + 1) as f32,
+                                        + display_rect.height() / DISPLAY_HEIGHT as f32
+                                            * (row + 1) as f32,
                                 },
                             },
                             0.0,
@@ -376,13 +394,16 @@ struct Chip8 {
     v: [u8; 16],
     i: u16,
     pc: Address,
-    gfx: [u64; 32],
+    gfx: [u64; DISPLAY_HEIGHT],
     delay_timer: u8,
     sound_timer: u8,
     stack: [Address; 16],
     sp: u16,
     keys: u16,
     key_pressed: Option<u8>,
+
+    last_gfx: [u64; DISPLAY_HEIGHT],
+    last_gfx_ttl: u8,
 
     loaded_rom: Option<std::path::PathBuf>,
 }
@@ -887,14 +908,16 @@ impl Chip8 {
             memory: [0; 4096],
             v: [0; 16],
             i: 0,
-            pc: 0x200,
-            gfx: [0; 32],
+            pc: FIRST_INSTRUCTION_ADDRESS,
+            gfx: [0; DISPLAY_HEIGHT],
             delay_timer: 0,
             sound_timer: 0,
             stack: [0; 16],
             sp: 0,
             keys: 0,
             key_pressed: None,
+            last_gfx: [0; DISPLAY_HEIGHT],
+            last_gfx_ttl: 0,
             loaded_rom: rom.clone(),
         };
         s.memory[0..FONT_SET.len()].copy_from_slice(FONT_SET.as_slice());
@@ -919,7 +942,7 @@ impl Chip8 {
                     std::eprintln!("Unimplemented opcode {:#06X}", self.opcode);
                 } //Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
                 Opcode::CLR => {
-                    self.gfx = [0; 32];
+                    self.gfx = [0; DISPLAY_HEIGHT];
                 } // 	disp_clear() 	Clears the screen.
                 Opcode::RTS => {
                     self.pc = self.stack[self.sp as usize];
@@ -1006,19 +1029,27 @@ impl Chip8 {
                     self.v[register as usize] = random::<u8>() & literal;
                 } //Vx = rand() & NN 	Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
                 Opcode::DRAW((register_x, register_y, literal)) => {
-                    let x = self.v[register_x as usize] as usize % 64;
-                    let y = self.v[register_y as usize] as usize % 32;
-                    let height = cmp::min(literal + y as u8, 32) as usize - y;
+                    let x = self.v[register_x as usize] as usize % DISPLAY_WIDTH;
+                    let y = self.v[register_y as usize] as usize % DISPLAY_HEIGHT;
+                    let height = cmp::min(literal + y as u8, DISPLAY_HEIGHT as u8) as usize - y;
+
+                    self.last_gfx = self.gfx;
                     let mut bit_unset = 0;
                     for i in 0..height {
                         let current_row = self.gfx[y + i];
-                        let current_wide_row = (current_row as u128) << 64;
+                        let current_wide_row = (current_row as u128) << DISPLAY_WIDTH;
                         let sprite_wide_row =
                             (self.memory[self.i as usize + i] as u128) << (128 - 8 - x);
-                        self.gfx[y + i] = ((current_wide_row ^ sprite_wide_row) >> 64) as u64;
+                        self.gfx[y + i] =
+                            ((current_wide_row ^ sprite_wide_row) >> DISPLAY_WIDTH) as u64;
                         bit_unset |= (current_row ^ self.gfx[y + i]) & current_row;
                     }
                     self.v[0xF] = (bit_unset != 0) as u8;
+                    if bit_unset != 0 {
+                        self.last_gfx_ttl = PIXEL_ERASE_CYCLE_DELAY;
+                    } else {
+                        self.last_gfx_ttl = 0;
+                    }
                 } //draw(Vx, Vy, N) 	Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
                 //  Each row of 8 pixels is read as bit-coded starting from memory location I; I value does not change after the execution of this instruction.
                 //  As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that does not happen.
@@ -1081,6 +1112,9 @@ impl Chip8 {
         }
         if self.sound_timer > 0 {
             self.sound_timer -= 1;
+        }
+        if self.last_gfx_ttl > 0 {
+            self.last_gfx_ttl -= 1;
         }
     }
 }
