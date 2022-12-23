@@ -27,7 +27,7 @@ static FONT_SET: [u8; 80] = [
 const FIRST_INSTRUCTION_ADDRESS: u16 = 0x200;
 const DISPLAY_HEIGHT: usize = 32;
 const DISPLAY_WIDTH: usize = 64;
-const PIXEL_ERASE_CYCLE_DELAY: u8 = 8;
+const PIXEL_ERASE_CYCLE_DELAY: u8 = 12;
 
 const PRIMARY_COLOR: Color32 = Color32::from_rgb(2, 238, 179);
 const COMPLEMENTARY_COLOR: Color32 = Color32::from_rgb(238, 2, 61);
@@ -115,6 +115,10 @@ impl eframe::App for Quip8App {
                         run_cycles = 5;
                     }
                 });
+                if ui.button("Reset").clicked() {
+                    self.chip8 = Chip8::new(self.chip8.loaded_rom.clone());
+                }
+                ui.toggle_value(&mut self.chip8.deflicker, "Deflicker");
             });
         });
 
@@ -387,32 +391,6 @@ impl eframe::App for Quip8App {
 type Address = u16;
 type RegisterAddress = u8;
 type Literal = u8;
-
-struct Chip8 {
-    opcode: u16,
-    memory: [u8; 4096],
-    v: [u8; 16],
-    i: u16,
-    pc: Address,
-    gfx: [u64; DISPLAY_HEIGHT],
-    delay_timer: u8,
-    sound_timer: u8,
-    stack: [Address; 16],
-    sp: u16,
-    keys: u16,
-    key_pressed: Option<u8>,
-
-    last_gfx: [u64; DISPLAY_HEIGHT],
-    last_gfx_ttl: u8,
-
-    loaded_rom: Option<std::path::PathBuf>,
-}
-
-impl Default for Chip8 {
-    fn default() -> Self {
-        Self::new(None)
-    }
-}
 
 enum Opcode {
     // 0x0NNN - Call
@@ -901,6 +879,33 @@ impl Opcode {
     }
 }
 
+struct Chip8 {
+    opcode: u16,
+    memory: [u8; 4096],
+    v: [u8; 16],
+    i: u16,
+    pc: Address,
+    gfx: [u64; DISPLAY_HEIGHT],
+    delay_timer: u8,
+    sound_timer: u8,
+    stack: [Address; 16],
+    sp: u16,
+    keys: u16,
+    key_pressed: Option<u8>,
+
+    last_gfx: [u64; DISPLAY_HEIGHT],
+    last_gfx_ttl: u8,
+    deflicker: bool,
+
+    loaded_rom: Option<std::path::PathBuf>,
+}
+
+impl Default for Chip8 {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
 impl Chip8 {
     pub fn new(rom: Option<std::path::PathBuf>) -> Self {
         let mut s = Self {
@@ -918,6 +923,7 @@ impl Chip8 {
             key_pressed: None,
             last_gfx: [0; DISPLAY_HEIGHT],
             last_gfx_ttl: 0,
+            deflicker: true,
             loaded_rom: rom.clone(),
         };
         s.memory[0..FONT_SET.len()].copy_from_slice(FONT_SET.as_slice());
@@ -1045,7 +1051,7 @@ impl Chip8 {
                         bit_unset |= (current_row ^ self.gfx[y + i]) & current_row;
                     }
                     self.v[0xF] = (bit_unset != 0) as u8;
-                    if bit_unset != 0 {
+                    if bit_unset != 0 && self.deflicker {
                         self.last_gfx_ttl = PIXEL_ERASE_CYCLE_DELAY;
                     } else {
                         self.last_gfx_ttl = 0;
