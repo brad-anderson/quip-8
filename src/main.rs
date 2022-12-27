@@ -30,8 +30,8 @@ const DISPLAY_WIDTH: usize = 64;
 const PIXEL_ERASE_CYCLE_DELAY: u8 = 12;
 
 const PRIMARY_COLOR: Color32 = Color32::from_rgb(2, 238, 179);
-const COMPLEMENTARY_COLOR: Color32 = Color32::from_rgb(238, 2, 61);
-const ANALAGOUS1_COLOR: Color32 = Color32::from_rgb(2, 238, 61);
+//const COMPLEMENTARY_COLOR: Color32 = Color32::from_rgb(238, 2, 61);
+//const ANALAGOUS1_COLOR: Color32 = Color32::from_rgb(2, 238, 61);
 const ANALAGOUS2_COLOR: Color32 = Color32::from_rgb(2, 179, 238);
 
 #[derive(Default)]
@@ -192,24 +192,6 @@ impl eframe::App for Quip8App {
                         ui.end_row();
                     });
                 });
-                /*let raw_opcode = (self.chip8.memory[self.chip8.pc as usize] as u16) << 8
-                    | self.chip8.memory[(self.chip8.pc + 1) as usize] as u16;
-                ui.label(format!(
-                    "Next opcode: {:#06X} - {}",
-                    raw_opcode,
-                    Opcode::decode(raw_opcode)
-                        .map_or("Unknown opcode".to_string(), |o| o.describe(&self.chip8))
-                ));
-                */
-                /*
-                if let Some(file) = &self.chip8.loaded_rom {
-                    ui.heading(
-                        file.file_name()
-                            .expect("no filename")
-                            .to_str()
-                            .expect("filename not valid unicode"),
-                    );
-                }*/
             });
         });
 
@@ -217,7 +199,7 @@ impl eframe::App for Quip8App {
             ui.heading("Keys");
             let key_color = |key: u32| {
                 if self.chip8.keys & (1 << key) != 0 {
-                    COMPLEMENTARY_COLOR
+                    ANALAGOUS2_COLOR
                 } else {
                     Color32::GRAY
                 }
@@ -255,7 +237,7 @@ impl eframe::App for Quip8App {
                     (self.chip8.memory[pc] as u16) << 8 | self.chip8.memory[pc + 1] as u16;
                 let opcode_maybe = Opcode::decode(raw_opcode);
                 if let Ok(opcode) = opcode_maybe {
-                    ui.label(
+                    let instruction_label = ui.label(
                         RichText::new(format!(
                             "{}{:03X} {:5} {:3} {:2} {:2}",
                             if pc == self.chip8.pc as usize {
@@ -278,6 +260,10 @@ impl eframe::App for Quip8App {
                         .color(ANALAGOUS2_COLOR)
                         .monospace(),
                     );
+
+                    if self.paused {
+                        instruction_label.on_hover_text(opcode.describe(&self.chip8));
+                    }
                 } else {
                     ui.label(
                         RichText::new(format!(
