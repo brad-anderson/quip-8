@@ -36,8 +36,7 @@ const ANALAGOUS2_COLOR: Color32 = Color32::from_rgb(2, 179, 238);
 
 #[derive(Default)]
 struct Quip8App {
-    chip8: Chip8,
-    paused: bool,
+    chip8: Option<Chip8>,
 }
 
 impl Quip8App {
@@ -45,8 +44,7 @@ impl Quip8App {
     fn new(cc: &eframe::CreationContext<'_>, initial_rom: Option<std::path::PathBuf>) -> Self {
         // egui customizations go here
         Self {
-            chip8: Chip8::new(initial_rom),
-            paused: true,
+            chip8: initial_rom.map_or(None, |r| Some(Chip8::new(r))),
             ..Self::default()
         }
     }
@@ -54,8 +52,50 @@ impl Quip8App {
 
 impl eframe::App for Quip8App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let previous_keys = self.chip8.keys;
-        self.chip8.keys = ctx.input().keys_down.contains(&Key::Num1) as u16
+        let mut requested_run_cycles: Option<u32> = None;
+
+        egui::TopBottomPanel::top("top").show(ctx, |ui| {
+            use egui::menu;
+            menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open").clicked() {
+                        // …
+                    }
+                });
+                ui.separator();
+                if let Some(chip8) = self.chip8.as_mut() {
+                    ui.add_enabled_ui(!chip8.paused, |ui| {
+                        if ui.button("Pause").clicked() {
+                            chip8.paused = true;
+                        }
+                    });
+                    ui.add_enabled_ui(chip8.paused, |ui| {
+                        if ui.button("Run").clicked() {
+                            chip8.paused = false;
+                        }
+                        if ui.button("Step").clicked() {
+                            requested_run_cycles = Some(1);
+                        }
+                        if ui.button("Step 5").clicked() {
+                            requested_run_cycles = Some(5);
+                        }
+                    });
+                    if ui.button("Reset").clicked() {
+                        *chip8 = Chip8::new(chip8.loaded_rom_path.clone());
+                    }
+                    ui.toggle_value(&mut chip8.deflicker, "Deflicker");
+                }
+            });
+        });
+
+        if self.chip8.is_none() {
+            return;
+        }
+
+        let chip8 = &mut self.chip8.as_mut().unwrap();
+
+        let previous_keys = chip8.keys;
+        chip8.keys = ctx.input().keys_down.contains(&Key::Num1) as u16
             | (ctx.input().keys_down.contains(&Key::Num2) as u16) << 1
             | (ctx.input().keys_down.contains(&Key::Num3) as u16) << 2
             | (ctx.input().keys_down.contains(&Key::Num4) as u16) << 3
@@ -72,12 +112,12 @@ impl eframe::App for Quip8App {
             | (ctx.input().keys_down.contains(&Key::C) as u16) << 14
             | (ctx.input().keys_down.contains(&Key::V) as u16) << 15;
 
-        self.chip8.key_pressed = None;
-        let keys_pressed_since = (previous_keys & self.chip8.keys) ^ self.chip8.keys;
+        chip8.key_pressed = None;
+        let keys_pressed_since = (previous_keys & chip8.keys) ^ chip8.keys;
         if keys_pressed_since != 0 {
             // This could be bit twiddled out
             let mut b = 0;
-            self.chip8.key_pressed = loop {
+            chip8.key_pressed = loop {
                 if keys_pressed_since & (1 << b) != 0 {
                     break Some(b);
                 }
@@ -88,109 +128,73 @@ impl eframe::App for Quip8App {
             };
         }
 
-        let mut run_cycles = if !self.paused { 1 } else { 0 };
-
-        egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            use egui::menu;
-            menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open").clicked() {
-                        // …
-                    }
-                });
-                ui.separator();
-                ui.add_enabled_ui(!self.paused, |ui| {
-                    if ui.button("Pause").clicked() {
-                        self.paused = !self.paused;
-                    }
-                });
-                ui.add_enabled_ui(self.paused, |ui| {
-                    if ui.button("Run").clicked() {
-                        self.paused = !self.paused;
-                    }
-                    if ui.button("Step").clicked() {
-                        run_cycles = 1;
-                    }
-                    if ui.button("Step 5").clicked() {
-                        run_cycles = 5;
-                    }
-                });
-                if ui.button("Reset").clicked() {
-                    self.chip8 = Chip8::new(self.chip8.loaded_rom.clone());
-                }
-                ui.toggle_value(&mut self.chip8.deflicker, "Deflicker");
-            });
-        });
-
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
-            ui.add_enabled_ui(self.chip8.loaded_rom.is_some(), |ui| {
-                ui.horizontal(|ui| {
-                    egui::Grid::new("registers").show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("PC").monospace());
-                            ui.label(
-                                RichText::new(format!("{:03X}", self.chip8.pc))
-                                    .monospace()
-                                    .color(ANALAGOUS2_COLOR),
-                            );
-                            ui.separator();
-                        });
+            ui.horizontal(|ui| {
+                egui::Grid::new("registers").show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("PC").monospace());
+                        ui.label(
+                            RichText::new(format!("{:03X}", chip8.pc))
+                                .monospace()
+                                .color(ANALAGOUS2_COLOR),
+                        );
+                        ui.separator();
+                    });
 
-                        for v in self.chip8.v[0..8].iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("V{:X}", v.0)).monospace());
-                                ui.label(
-                                    RichText::new(format!("{:02X}", v.1))
-                                        .monospace()
-                                        .color(ANALAGOUS2_COLOR),
-                                );
-                                ui.separator();
-                            });
-                        }
+                    for v in chip8.v[0..8].iter().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("DELAY").monospace());
+                            ui.label(RichText::new(format!("V{:X}", v.0)).monospace());
                             ui.label(
-                                RichText::new(format!("{:02X}", self.chip8.delay_timer))
+                                RichText::new(format!("{:02X}", v.1))
                                     .monospace()
                                     .color(ANALAGOUS2_COLOR),
                             );
                             ui.separator();
                         });
-                        ui.end_row();
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("DELAY").monospace());
+                        ui.label(
+                            RichText::new(format!("{:02X}", chip8.delay_timer))
+                                .monospace()
+                                .color(ANALAGOUS2_COLOR),
+                        );
+                        ui.separator();
+                    });
+                    ui.end_row();
 
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("I ").monospace());
-                            ui.label(
-                                RichText::new(format!("{:03X}", self.chip8.i))
-                                    .monospace()
-                                    .color(ANALAGOUS2_COLOR),
-                            );
-                            ui.separator();
-                        });
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("I ").monospace());
+                        ui.label(
+                            RichText::new(format!("{:03X}", chip8.i))
+                                .monospace()
+                                .color(ANALAGOUS2_COLOR),
+                        );
+                        ui.separator();
+                    });
 
-                        for v in self.chip8.v[8..].iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("V{:X}", v.0 + 8)).monospace());
-                                ui.label(
-                                    RichText::new(format!("{:02X}", v.1))
-                                        .monospace()
-                                        .color(ANALAGOUS2_COLOR),
-                                );
-                                ui.separator();
-                            });
-                        }
+                    for v in chip8.v[8..].iter().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("SOUND").monospace());
+                            ui.label(RichText::new(format!("V{:X}", v.0 + 8)).monospace());
                             ui.label(
-                                RichText::new(format!("{:02X}", self.chip8.sound_timer))
+                                RichText::new(format!("{:02X}", v.1))
                                     .monospace()
                                     .color(ANALAGOUS2_COLOR),
                             );
                             ui.separator();
-                            ui.end_row();
                         });
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("SOUND").monospace());
+                        ui.label(
+                            RichText::new(format!("{:02X}", chip8.sound_timer))
+                                .monospace()
+                                .color(ANALAGOUS2_COLOR),
+                        );
+                        ui.separator();
                         ui.end_row();
                     });
+                    ui.end_row();
                 });
             });
         });
@@ -198,7 +202,7 @@ impl eframe::App for Quip8App {
         egui::SidePanel::right("memory").show(ctx, |ui| {
             ui.heading("Keys");
             let key_color = |key: u32| {
-                if self.chip8.keys & (1 << key) != 0 {
+                if chip8.keys & (1 << key) != 0 {
                     ANALAGOUS2_COLOR
                 } else {
                     Color32::GRAY
@@ -232,15 +236,14 @@ impl eframe::App for Quip8App {
             ui.separator();
             ui.heading("Instructions");
             for i in 0..12 {
-                let pc = (self.chip8.pc as i64 + (i as i16 - 3) as i64 * 2) as usize;
-                let raw_opcode =
-                    (self.chip8.memory[pc] as u16) << 8 | self.chip8.memory[pc + 1] as u16;
+                let pc = (chip8.pc as i64 + (i as i16 - 3) as i64 * 2) as usize;
+                let raw_opcode = (chip8.memory[pc] as u16) << 8 | chip8.memory[pc + 1] as u16;
                 let opcode_maybe = Opcode::decode(raw_opcode);
                 if let Ok(opcode) = opcode_maybe {
                     let instruction_label = ui.label(
                         RichText::new(format!(
                             "{}{:03X} {:5} {:3} {:2} {:2}",
-                            if pc == self.chip8.pc as usize {
+                            if pc == chip8.pc as usize {
                                 "\u{2794}"
                             } else {
                                 " "
@@ -261,14 +264,14 @@ impl eframe::App for Quip8App {
                         .monospace(),
                     );
 
-                    if self.paused {
-                        instruction_label.on_hover_text(opcode.describe(&self.chip8));
+                    if chip8.paused {
+                        instruction_label.on_hover_text(opcode.describe(&chip8));
                     }
                 } else {
                     ui.label(
                         RichText::new(format!(
                             "{}{:03X} UNKNOWN {:#06X}",
-                            if pc == self.chip8.pc as usize {
+                            if pc == chip8.pc as usize {
                                 "\u{2794}"
                             } else {
                                 " "
@@ -282,14 +285,11 @@ impl eframe::App for Quip8App {
             }
             ui.separator();
             ui.heading("Stack");
-            for i in 0..self.chip8.sp {
+            for i in 0..chip8.sp {
                 ui.label(
-                    RichText::new(format!(
-                        "{:03X}",
-                        self.chip8.stack[(self.chip8.sp - i) as usize]
-                    ))
-                    .color(ANALAGOUS2_COLOR)
-                    .monospace(),
+                    RichText::new(format!("{:03X}", chip8.stack[(chip8.sp - i) as usize]))
+                        .color(ANALAGOUS2_COLOR)
+                        .monospace(),
                 );
             }
         });
@@ -305,11 +305,11 @@ impl eframe::App for Quip8App {
             };
             let display_rect = Rect::from_center_size(res.rect.center(), display_size);
             painter.rect_filled(display_rect, 0.0, Color32::from_rgb(5, 10, 5));
-            for (row, row_data) in self.chip8.gfx.iter().enumerate() {
+            for (row, row_data) in chip8.gfx.iter().enumerate() {
                 for col in 0..DISPLAY_WIDTH {
                     if (row_data
-                        | (if self.chip8.last_gfx_ttl > 0 {
-                            self.chip8.last_gfx[row]
+                        | (if chip8.last_gfx_ttl > 0 {
+                            chip8.last_gfx[row]
                         } else {
                             0
                         }))
@@ -364,11 +364,15 @@ impl eframe::App for Quip8App {
             }
         });
 
-        for _ in 0..run_cycles {
-            self.chip8.emulate_cycle();
+        if !chip8.paused {
+            chip8.emulate_cycle();
+            ctx.request_repaint();
         }
 
-        if run_cycles > 0 {
+        if let Some(cycles) = requested_run_cycles {
+            for _ in 0..cycles {
+                chip8.emulate_cycle();
+            }
             ctx.request_repaint();
         }
     }
@@ -883,17 +887,18 @@ struct Chip8 {
     last_gfx_ttl: u8,
     deflicker: bool,
 
-    loaded_rom: Option<std::path::PathBuf>,
+    paused: bool,
+    loaded_rom_path: std::path::PathBuf,
 }
 
-impl Default for Chip8 {
+/*impl Default for Chip8 {
     fn default() -> Self {
         Self::new(None)
     }
-}
+}*/
 
 impl Chip8 {
-    pub fn new(rom: Option<std::path::PathBuf>) -> Self {
+    pub fn new(rom_path: std::path::PathBuf) -> Self {
         let mut s = Self {
             opcode: 0,
             memory: [0; 4096],
@@ -910,14 +915,13 @@ impl Chip8 {
             last_gfx: [0; DISPLAY_HEIGHT],
             last_gfx_ttl: 0,
             deflicker: true,
-            loaded_rom: rom.clone(),
+            paused: true,
+            loaded_rom_path: rom_path,
         };
         s.memory[0..FONT_SET.len()].copy_from_slice(FONT_SET.as_slice());
-        if let Some(r) = rom {
-            let mut file_contents = std::fs::read(r).expect("Could not read file");
-            file_contents.resize(4096 - 512, 0);
-            s.memory[512..].copy_from_slice(file_contents.as_slice());
-        }
+        let mut file_contents = std::fs::read(&s.loaded_rom_path).unwrap_or("".into());
+        file_contents.resize(4096 - 512, 0);
+        s.memory[512..].copy_from_slice(file_contents.as_slice());
         s
     }
 
